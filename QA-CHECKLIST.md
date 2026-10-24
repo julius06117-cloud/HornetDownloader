@@ -3,7 +3,33 @@
 Run on a real Windows 10/11 x64 machine before every release (`.\build.ps1`, then install and exercise the build).
 Test only with content you are allowed to download (Debian images are used below). Tests and QA never open ports beyond loopback except the BitTorrent listener.
 
-Last run: **v1.5.2**, 2026-10-24 (Asia/Shanghai), Windows 11 x64, Go 1.26.1, build `HornetDownloader-win64.zip` (see SHA256SUMS.txt of the release).
+Last run: **v1.5.3**, 2026-10-24 (Asia/Shanghai), Windows 11 x64, **Go 1.26.10** (`go.mod` toolchain), build `HornetDownloader-win64.zip` (see SHA256SUMS.txt of the release).
+QA instance isolated from any real install: `--data-dir <qa>\data --port 16931 --pprof 127.0.0.1:6071`, downloads only into `<qa>\dl`.
+
+## v1.5.3 results
+
+| # | Area | Check | Result | Notes |
+|---|------|-------|--------|-------|
+| A1 | Toolchain | `go version -m HornetDownloader.exe` = go1.26.10; `app.log` start line logs `go=go1.26.10` | PASS | go1.26.0/1.26.1 corrupt stacks on Windows overlapped UDP I/O (golang/go#77975) |
+| A2 | Crash repro | Same soak on the old go1.26.1 build | CRASH at ~1.2 min | `0xc0000005`, captured in `crash-*.log` (new crash log works) |
+| A3 | Soak | go1.26.10 build, 21.9 min: BT DVD-1 (3.8 GB, peak 42.7 MB/s) + BT BD-1 (18.3 GB) + 22 HTTP `hdl get` loops + 3225 details API calls | PASS | no crash; 0 HTTP failures; 0 API errors |
+| A4 | Memory | Soak working set 84→214 MB (plateau 190–214 MB with an 18 GB torrent), Go heap 17–133 MB non-monotonic, goroutines 193–557, aria2c ≤17 MB | PASS | heap dominated by anacrolix piece state, proportional to torrent size |
+| A5 | HTTP | Debian netinst ISO (756 MB) via 16 conns: avg 31.2 / peak 76.0 MB/s, SHA256 matches | PASS | curl single-stream reference 57 MB/s |
+| A6 | HTTP | Pause → speed 0; kill + restart restores the task with the same id; `.aria2` cleaned after completion | PASS | |
+| A7 | UA | Default UA `HornetDownloader/1.5.3`; TUNA/BFSU 403 → fallback `Wget/1.21.4` succeeds | PASS | |
+| A8 | HTML guard | Wikimedia `File:` page forced to aria2 → task error with Chinese message, fake file deleted, `hdl get` exit 1 | PASS | |
+| A9 | HTML guard | Restart: aria2 re-downloads the errored page from its session → deleted again, task stays error | PASS | known: the page is re-fetched once per restart |
+| A10 | BT | Magnet: stable id `bt-<infohash>` across restarts, metadata 2.1 s, SHA256 matches, createdAt preserved, no fake speed during recheck | PASS | |
+| A11 | BT | Recheck hint 「正在校验已下载的数据…」 shown only while re-hashing after restart, not during a 50 MB/s download | PASS | |
+| A12 | BT | Peers tab per-peer ↑ uses byte deltas; sum of peers ≈ task upload speed | PASS | previously showed bursts of tens of MB/s per peer |
+| A13 | BT | Reselect files on completed multi-file torrent (Sintel 0.1 → 123.3 MB) | PASS | |
+| A14 | Tasks | Removed tasks do not reappear after restart | PASS | |
+| A15 | yt-dlp | Wikimedia Commons 30 MB / 6 s; bilibili 112 MB / 16 s; real file size shown | PASS | |
+| A16 | CLI | `hdl list` warm ×10 median 13 ms; `get` warm 1.0 s / cold 1.3 s; app stopped → exit 3 in 13 ms | PASS | |
+| A17 | UI | Details status in Chinese; one 「×」 in details; 1280×820 @150% layout; settings show UA / fallback UA / clipboard toggle | PASS | screenshots v153-main/details/peers/settings |
+| A18 | Build | `go vet` (windows + linux), `go test -count=3 ./...`, `node scripts/ui_ops_check.mjs`, `.\build.ps1` | PASS | |
+
+## Base checklist (results below are from the last full pass, v1.5.2; v1.5.3 re-ran the items covered in the table above plus the live-release install, row 11)
 
 | # | Area | Check | Result | Notes |
 |---|------|-------|--------|-------|

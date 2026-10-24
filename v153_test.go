@@ -247,6 +247,10 @@ func TestHTMLGuardDeletesAgainAfterRestart(t *testing.T) {
 		}{URI: "https://commons.wikimedia.org/wiki/File:Movie.ogv"})
 		return st
 	}
+	// guards 是包级状态，-count>1 时上一轮会留下 h1
+	guards.mu.Lock()
+	delete(guards.checked, "h1")
+	guards.mu.Unlock()
 	a := &App{dataDir: dir, res: newResilience()}
 	a.loadTaskMeta()
 	if err := os.WriteFile(p, html, 0o644); err != nil {
