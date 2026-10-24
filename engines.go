@@ -125,6 +125,7 @@ func (a *App) handleAdd(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Engine   string          `json:"engine"`
 		Dir      string          `json:"dir"`
+		URL      string          `json:"url"` // 单个链接（自动化用；等同 urls:[url]）
 		URLs     []string        `json:"urls"`
 		Torrents []addReqTorrent `json:"torrents"`
 	}
@@ -140,6 +141,9 @@ func (a *App) handleAdd(w http.ResponseWriter, r *http.Request) {
 	dir := strings.TrimSpace(req.Dir)
 	if dir == "" {
 		dir = defDir
+	}
+	if u := strings.TrimSpace(req.URL); u != "" {
+		req.URLs = append([]string{u}, req.URLs...)
 	}
 	added := []addOutcome{}
 	var errs []string
@@ -180,6 +184,9 @@ func (a *App) handleAdd(w http.ResponseWriter, r *http.Request) {
 
 	a.kickTasks()
 	out := map[string]any{"ok": len(errs) == 0 || len(added) > 0, "added": added}
+	if len(added) > 0 {
+		out["id"] = added[0].GID
+	}
 	if len(errs) > 0 {
 		out["errors"] = errs
 		if len(added) == 0 {

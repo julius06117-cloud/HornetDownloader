@@ -32,6 +32,9 @@ aside{background:var(--panel);border-right:1px solid var(--line);padding:12px 8p
 .nav:hover{background:#f3f5f9}
 .nav.on{background:var(--pri2);color:var(--pri);font-weight:600}
 .nav b{font-weight:400;color:var(--sub);font-size:12px}
+.srcf{display:flex;align-items:center;gap:8px;padding:12px 12px 0;margin-top:8px;border-top:1px solid #eef0f4}
+.srcf select{flex:1}
+.agtag{display:inline-block;font-size:11px;line-height:16px;padding:0 5px;border-radius:4px;background:#efe9ff;color:#6a3fd1;margin-right:5px}
 main{overflow:auto;padding:12px 16px}
 table{width:100%;border-collapse:separate;border-spacing:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;table-layout:fixed}
 th{font-weight:400;color:var(--sub);text-align:left;font-size:12px;padding:8px 10px;border-bottom:1px solid var(--line);background:#fafbfd}
@@ -122,6 +125,7 @@ textarea{width:100%;resize:vertical}
     <div class="nav on" data-v="dl">正在下载 <b id="cDl">0</b></div>
     <div class="nav" data-v="done">已完成 <b id="cDone">0</b></div>
     <div class="nav" data-v="err">失败 <b id="cErr">0</b></div>
+    <div class="srcf"><label class="hint" for="srcSel">来源</label><select id="srcSel" title="按添加来源筛选：自己在界面添加的，或脚本 / 编程助手（命令行、/api/v1）添加的"><option value="all">全部</option><option value="user">我添加的</option><option value="agent">Agent 添加的</option></select></div>
   </aside>
   <main id="main"></main>
   <footer><span id="fDir"></span><span class="grow"></span><span id="fConn">正在连接下载引擎…</span></footer>
@@ -401,7 +405,10 @@ async function poll() {
     if (++failCount > 2) setConn("与程序后台的连接中断：" + e.message + "，正在重试…", true);
   } finally { polling = false; }
 }
+let srcFilter = "all";
+function srcOK(t) { return srcFilter === "all" || (t.addedBy || "user") === srcFilter; }
 function inView(t) {
+  if (!srcOK(t)) return false;
   if (view === "dl") return ["active","waiting","paused"].includes(t.status);
   if (view === "done") return t.status === "complete";
   return t.status === "error" || t.status === "removed";
@@ -442,7 +449,7 @@ function rowCells(t) {
     + (sub ? '<span class="stsub">' + esc(sub) + '</span>' : "");
   return [
     '<input type="checkbox" class="sel"' + (selected.has(t.gid) ? " checked" : "") + '>',
-    '<div class="name" title="' + name + '"><span class="tag ' + tc + '">' + tp + '</span>' + engineBadge(t) + name + '</div>',
+    '<div class="name" title="' + name + '"><span class="tag ' + tc + '">' + tp + '</span>' + engineBadge(t) + (t.addedBy === "agent" ? '<span class="agtag" title="由脚本 / 编程助手添加">Agent</span>' : '') + name + '</div>',
     total ? fmtSize(total) : "--",
     '<div class="hint">' + pct.toFixed(1) + '%' + (total ? " · " + fmtSize(done) : "") + '</div><div class="bar ' + barCls + '"><div style="width:' + pct + '%"></div></div>',
     '<span' + extra + '>' + speed + '</span>',
@@ -452,9 +459,9 @@ function rowCells(t) {
   ];
 }
 function render() {
-  $("#cDl").textContent = tasks.filter(t => ["active","waiting","paused"].includes(t.status)).length;
-  $("#cDone").textContent = tasks.filter(t => t.status === "complete").length;
-  $("#cErr").textContent = tasks.filter(t => t.status === "error" || t.status === "removed").length;
+  $("#cDl").textContent = tasks.filter(t => srcOK(t) && ["active","waiting","paused"].includes(t.status)).length;
+  $("#cDone").textContent = tasks.filter(t => srcOK(t) && t.status === "complete").length;
+  $("#cErr").textContent = tasks.filter(t => srcOK(t) && (t.status === "error" || t.status === "removed")).length;
   const list = tasks.filter(inView);
   const gids = new Set(tasks.map(t => t.gid));
   for (const g of [...selected]) if (!gids.has(g)) selected.delete(g);
@@ -545,6 +552,7 @@ $("#main").addEventListener("click", async e => {
   syncRowSelect(tr, gid);
 });
 
+$("#srcSel").onchange = e => { srcFilter = e.target.value; selected.clear(); render(); };
 document.querySelectorAll(".nav").forEach(n => n.onclick = () => { document.querySelectorAll(".nav").forEach(x => x.classList.remove("on")); n.classList.add("on"); view = n.dataset.v; selected.clear(); render(); });
 document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => closeDlg(b.closest(".mask")));
 function openDlg(id) { $(id).classList.add("on"); }

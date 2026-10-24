@@ -186,6 +186,7 @@ func (e *YTDLPEngine) AddURL(uri, dir string) (string, error) {
 		"--newline",
 		"--no-playlist",
 		"--no-color",
+		"--encoding", "utf-8", // 否则在中文 Windows 上按 GBK 输出，错误信息会乱码
 		"-o", outTmpl,
 		"--progress-template", "download:{\"pct\":\"%(progress._percent_str)s\",\"spd\":\"%(progress._speed_str)s\",\"eta\":\"%(progress._eta_str)s\",\"total\":\"%(progress._total_bytes_str)s\",\"done\":\"%(progress._downloaded_bytes_str)s\"}",
 		uri,
@@ -309,10 +310,33 @@ func parseSpeed(s string) int64 {
 
 func trimErr(s string) string {
 	s = strings.TrimSpace(s)
-	if len(s) > 200 {
-		return s[:200]
+	hint := ytdlpHint(s)
+	if r := []rune(s); len(r) > 200 {
+		s = string(r[:200]) + "…"
+	}
+	if hint != "" {
+		return hint + "（" + s + "）"
 	}
 	return s
+}
+
+// ytdlpHint 把常见的 yt-dlp 英文错误翻成一句中文说明（原文保留在括号里）。
+func ytdlpHint(s string) string {
+	l := strings.ToLower(s)
+	switch {
+	case strings.Contains(l, "confirm you") && strings.Contains(l, "not a bot"),
+		strings.Contains(l, "sign in to confirm"):
+		return "网站要求登录验证（YouTube 风控），当前网络无法匿名下载，可稍后重试或换网络"
+	case strings.Contains(l, "video unavailable"), strings.Contains(l, "private video"):
+		return "视频不可用（已删除、私密或地区限制）"
+	case strings.Contains(l, "unsupported url"):
+		return "不支持这个链接"
+	case strings.Contains(l, "http error 403"):
+		return "服务器拒绝访问（403）"
+	case strings.Contains(l, "http error 404"):
+		return "视频不存在（404）"
+	}
+	return ""
 }
 
 func (e *YTDLPEngine) Pause(gid string) error {

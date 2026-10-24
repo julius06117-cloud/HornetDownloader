@@ -39,3 +39,29 @@ func TestConfigBTPortNormalize(t *testing.T) {
 		}
 	}
 }
+
+func TestFirewallNetshCommands(t *testing.T) {
+	cmds, err := firewallNetshCommands("add", false, `C:\Apps\HornetDownloader.exe`, "")
+	if err != nil || len(cmds) != 2 {
+		t.Fatalf("%v %v", cmds, err)
+	}
+	if !strings.HasPrefix(cmds[0], `advfirewall firewall delete rule name="HornetDownloader"`) {
+		t.Fatalf("must delete first (idempotent): %s", cmds[0])
+	}
+	if !strings.Contains(cmds[1], "profile=private ") || !strings.Contains(cmds[1], `program="C:\Apps\HornetDownloader.exe"`) || !strings.Contains(cmds[1], "dir=in action=allow") {
+		t.Fatalf("add rule: %s", cmds[1])
+	}
+	cmds, _ = firewallNetshCommands("add", true, `C:\x.exe`, "")
+	if !strings.Contains(cmds[1], "profile=private,public") {
+		t.Fatalf("public: %s", cmds[1])
+	}
+	if cmds, _ := firewallNetshCommands("remove", false, `C:\x.exe`, ""); len(cmds) != 1 {
+		t.Fatalf("remove: %v", cmds)
+	}
+	if _, err := firewallNetshCommands("add", false, `C:\a"b.exe`, ""); err == nil {
+		t.Fatal("quote in path must be rejected")
+	}
+	if _, err := firewallNetshCommands("bogus", false, `C:\x.exe`, ""); err == nil {
+		t.Fatal("unknown action must fail")
+	}
+}

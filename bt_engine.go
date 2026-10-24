@@ -2,15 +2,17 @@ package main
 
 import (
 	"bytes"
-	"io"
-	"net/http"
-	"path"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -98,6 +100,7 @@ func StartBTEngine(appData string, cfgFn func() Config, trackers func() []string
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
+	processPendingDeletes(dir)
 	port := 0
 	if !btLoopbackOnly {
 		preferred := 0
@@ -650,7 +653,7 @@ func (e *BTEngine) Remove(gid string, deleteFiles bool) error {
 		if task.metaOK {
 			name = task.t.Name()
 			for _, f := range task.t.Files() {
-				paths = append(paths, filepath.Join(task.dir, f.DisplayPath()))
+				paths = append(paths, filepath.Join(task.dir, filepath.FromSlash(f.Path())))
 			}
 		}
 		task.t.Drop()
@@ -660,14 +663,133 @@ func (e *BTEngine) Remove(gid string, deleteFiles bool) error {
 	e.saveSessionLocked()
 	e.mu.Unlock()
 	if deleteFiles {
+		// 未完成的文件是 "<name>.part"（part files 存储）；本程序在下载目录里留的 .torrent 副本也一并删除。
+		var targets []string
 		for _, p := range paths {
-			_ = os.Remove(p)
+			targets = append(targets, p, p+".part")
 		}
+		if keep, ok := strings.CutPrefix(task.uri, "file://"); ok && strings.HasSuffix(strings.ToLower(keep), ".torrent") &&
+			filepath.Clean(filepath.Dir(keep)) == filepath.Clean(task.dir) {
+			targets = append(targets, keep)
+		}
+		left := removeFilesRetry(targets, 3*time.Second)
 		if name != "" {
-			_ = os.Remove(filepath.Join(task.dir, name))
+			removeEmptyDirs(filepath.Join(task.dir, name), task.dir)
+		}
+		if len(left) > 0 {
+			// anacrolix 的 mmap 存储在进程退出前不释放文件句柄（Windows 上无法删除）：记下来，下次启动时删。
+			log.Printf("[bt] %d 个文件仍被占用，将在下次启动时删除: %v", len(left), left)
+			pd := btPendingDelete{Files: left}
+			if name != "" {
+				pd.Dirs = [][2]string{{filepath.Join(task.dir, name), task.dir}}
+			}
+			addPendingDeletes(e.dataDir, pd)
 		}
 	}
 	return nil
+}
+
+// btPendingDelete：删除任务时没能删掉的文件（被占用），下次启动 BT 引擎前处理。
+type btPendingDelete struct {
+	Files []string    `json:"files"`
+	Dirs  [][2]string `json:"dirs,omitempty"` // {root, stop}：删完文件后清理空目录
+	// 记录时的大小与修改时间；文件之后被改过（例如同一个种子又重新下载了）就不删。
+	Stamp map[string]string `json:"stamp,omitempty"`
+}
+
+func fileStamp(p string) string {
+	st, err := os.Stat(p)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d/%d", st.Size(), st.ModTime().UnixNano())
+}
+
+func pendingDeletePath(dataDir string) string { return filepath.Join(dataDir, "pending-delete.json") }
+
+func addPendingDeletes(dataDir string, add btPendingDelete) {
+	var cur btPendingDelete
+	if b, err := os.ReadFile(pendingDeletePath(dataDir)); err == nil {
+		_ = json.Unmarshal(b, &cur)
+	}
+	if cur.Stamp == nil {
+		cur.Stamp = map[string]string{}
+	}
+	for _, f := range add.Files {
+		cur.Stamp[f] = fileStamp(f)
+	}
+	cur.Files = append(cur.Files, add.Files...)
+	cur.Dirs = append(cur.Dirs, add.Dirs...)
+	if b, err := json.Marshal(cur); err == nil {
+		_ = os.WriteFile(pendingDeletePath(dataDir), b, 0600)
+	}
+}
+
+// processPendingDeletes 删除上次没删掉的文件；仍失败的留到下次。
+func processPendingDeletes(dataDir string) {
+	b, err := os.ReadFile(pendingDeletePath(dataDir))
+	if err != nil {
+		return
+	}
+	var cur btPendingDelete
+	if json.Unmarshal(b, &cur) != nil {
+		_ = os.Remove(pendingDeletePath(dataDir))
+		return
+	}
+	var todo []string
+	for _, f := range cur.Files {
+		if st, ok := cur.Stamp[f]; ok && st != "" && fileStamp(f) != st {
+			continue // 文件已被重新写过，保留
+		}
+		todo = append(todo, f)
+	}
+	left := removeFilesRetry(todo, 0)
+	for _, d := range cur.Dirs {
+		removeEmptyDirs(d[0], d[1])
+	}
+	if len(left) == 0 {
+		_ = os.Remove(pendingDeletePath(dataDir))
+		return
+	}
+	cur.Files = left
+	if b, err := json.Marshal(cur); err == nil {
+		_ = os.WriteFile(pendingDeletePath(dataDir), b, 0600)
+	}
+}
+
+// removeFilesRetry 删除文件；Windows 上 Drop 之后存储句柄可能还没关，被占用时短暂重试。返回仍未删掉的文件。
+func removeFilesRetry(paths []string, max time.Duration) []string {
+	deadline := time.Now().Add(max)
+	for {
+		var left []string
+		for _, p := range paths {
+			if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				left = append(left, p)
+			}
+		}
+		if len(left) == 0 || !time.Now().Before(deadline) {
+			return left
+		}
+		paths = left
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// removeEmptyDirs 自底向上删除 root 下（含 root）的空目录，不越过 stop。
+func removeEmptyDirs(root, stop string) {
+	if filepath.Clean(root) == filepath.Clean(stop) {
+		return
+	}
+	var dirs []string
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			dirs = append(dirs, p)
+		}
+		return nil
+	})
+	for i := len(dirs) - 1; i >= 0; i-- {
+		_ = os.Remove(dirs[i]) // 非空则失败，保持原样
+	}
 }
 
 func (e *BTEngine) StartSelected(gid, base string, except []int, skip bool) error {
@@ -808,7 +930,7 @@ func (e *BTEngine) snapshotLocked(task *btTask) map[string]any {
 			}
 			btInfo = map[string]any{"info": map[string]any{"name": name}}
 			files = []map[string]any{{
-				"path": filepath.Join(task.dir, name),
+				"path":   filepath.Join(task.dir, name),
 				"length": fmt.Sprintf("%d", total), "selected": "true",
 			}}
 		} else {
@@ -834,7 +956,7 @@ func (e *BTEngine) snapshotLocked(task *btTask) map[string]any {
 	m := map[string]any{
 		"gid": task.gid, "status": st,
 		"totalLength": fmt.Sprintf("%d", total), "completedLength": fmt.Sprintf("%d", done),
-		"uploadLength": "0",
+		"uploadLength":  "0",
 		"downloadSpeed": fmt.Sprintf("%d", spd), "uploadSpeed": fmt.Sprintf("%d", uspd),
 		"connections": fmt.Sprintf("%d", conn), "numSeeders": fmt.Sprintf("%d", seeds),
 		"dir": task.dir, "infoHash": task.infoHash, "bittorrent": btInfo, "files": files,

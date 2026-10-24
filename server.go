@@ -67,6 +67,15 @@ func (a *App) routes(port int) http.Handler {
 	api.HandleFunc("/api/inbox", a.handleInbox)
 	api.HandleFunc("/api/assoc", a.handleAssoc)
 	api.HandleFunc("/api/firewall", a.handleFirewall)
+	// 稳定的自动化 API（docs/AGENT_API.md）
+	api.HandleFunc("/api/v1/ping", a.handleV1Ping)
+	api.HandleFunc("/api/v1/add", a.handleV1Add)
+	api.HandleFunc("/api/v1/task", a.handleV1Task)
+	api.HandleFunc("/api/v1/tasks", a.handleV1Tasks)
+	api.HandleFunc("/api/v1/remove", a.handleV1Control)
+	api.HandleFunc("/api/v1/pause", a.handleV1Control)
+	api.HandleFunc("/api/v1/resume", a.handleV1Control)
+	api.HandleFunc("/api/task", a.handleV1Task)
 	api.HandleFunc("/api/readtorrent", a.handleReadTorrent)
 	api.HandleFunc("/api/config", a.handleConfig)
 	api.HandleFunc("/api/delete", a.handleDelete)
@@ -111,11 +120,11 @@ func (a *App) routes(port int) http.Handler {
 		w.Header().Set("X-App", appName)
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			// 自定义请求头 + 随机令牌：防止网页跨站调用本地接口
-			if r.Header.Get("X-Token") != a.uiToken {
+			if !a.tokenOK(r) {
 				http.Error(w, "unauthorized", 401)
 				return
 			}
-			allowGet := r.URL.Path == "/api/ping" || r.URL.Path == "/api/config" || r.URL.Path == "/api/tasks" || r.URL.Path == "/api/inbox" || r.URL.Path == "/api/assoc" || r.URL.Path == "/api/firewall"
+			allowGet := r.URL.Path == "/api/ping" || r.URL.Path == "/api/config" || r.URL.Path == "/api/tasks" || r.URL.Path == "/api/inbox" || r.URL.Path == "/api/assoc" || r.URL.Path == "/api/firewall" || r.URL.Path == "/api/v1/ping" || r.URL.Path == "/api/v1/task" || r.URL.Path == "/api/v1/tasks" || r.URL.Path == "/api/task"
 			if r.Method != http.MethodPost && !(r.Method == http.MethodGet && allowGet) {
 				http.Error(w, "method not allowed", 405)
 				return
@@ -724,6 +733,7 @@ func (a *App) fetchTasks() (any, error) {
 	stat["uploadSpeed"] = fmt.Sprintf("%d", parseInt64(stat["uploadSpeed"])+extraUL)
 	stat["numActive"] = fmt.Sprintf("%d", parseInt64(stat["numActive"])+int64(extraActive))
 	stat["numWaiting"] = fmt.Sprintf("%d", parseInt64(stat["numWaiting"])+int64(extraWaiting))
+	a.annotateSources(active, waiting, stopped)
 	return []any{active, waiting, stopped, stat}, nil
 }
 

@@ -10,7 +10,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -19,8 +18,6 @@ import (
 
 	"golang.org/x/sys/windows"
 )
-
-const firewallRuleName = "HornetDownloader"
 
 var (
 	shell32FW           = windows.NewLazySystemDLL("shell32.dll")
@@ -68,42 +65,21 @@ func runNetsh(args string) (string, error) {
 	return string(out), err
 }
 
-func firewallSafePath(p string) error {
-	if strings.ContainsAny(p, "\"\r\n") {
-		return fmt.Errorf("路径包含不支持的字符: %s", p)
-	}
-	return nil
-}
-
 // applyFirewallRules 在已提权的进程里执行（--firewall-rules）。
 func applyFirewallRules(action string, public bool, aria2 string) error {
 	exe, err := exePath()
 	if err != nil {
 		return err
 	}
-	_, _ = runNetsh(`advfirewall firewall delete rule name="` + firewallRuleName + `"`)
-	if action == "remove" {
-		return nil
+	cmds, err := firewallNetshCommands(action, public, exe, aria2)
+	if err != nil {
+		return err
 	}
-	if action != "add" {
-		return fmt.Errorf("未知操作 %q", action)
-	}
-	profile := "private"
-	if public {
-		profile = "private,public"
-	}
-	progs := []string{exe}
-	if aria2 != "" {
-		if _, err := os.Stat(aria2); err == nil {
-			progs = append(progs, aria2)
+	for i, c := range cmds {
+		out, err := runNetsh(c)
+		if i == 0 {
+			continue // delete：规则不存在时失败属正常
 		}
-	}
-	for _, p := range progs {
-		if err := firewallSafePath(p); err != nil {
-			return err
-		}
-		out, err := runNetsh(`advfirewall firewall add rule name="` + firewallRuleName +
-			`" dir=in action=allow enable=yes profile=` + profile + ` program="` + p + `"`)
 		if err != nil {
 			return fmt.Errorf("netsh 添加规则失败: %v %s", err, strings.TrimSpace(out))
 		}

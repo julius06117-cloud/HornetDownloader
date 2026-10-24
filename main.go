@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"hornetdl/internal/agentcli"
 )
 
 const appName = "HornetDownloader"
@@ -87,6 +89,7 @@ type App struct {
 	art      *artifacts
 	res      *resilience
 	uiToken  string
+	apiToken string // 持久本地 API 令牌（%APPDATA%\HornetDownloader\api-token）
 	uiURL    string
 	lastPing time.Time
 	pingMu   sync.Mutex
@@ -99,6 +102,8 @@ type App struct {
 	inboxMu sync.Mutex
 	inbox   []inboxItem
 
+	srcMu     sync.Mutex
+	agentGIDs map[string]int64 // 由 /api/v1/add 添加的任务（task-source.json）
 	createdMu sync.Mutex
 	created   map[string]time.Time
 
@@ -203,6 +208,12 @@ func (a *App) trackers() string {
 func (a *App) Quit() { a.quitOnce.Do(func() { close(a.quit) }) }
 
 func main() {
+	// 命令行子命令（get/add/wait/status/list）：作为客户端连接（或无窗口启动）本程序后退出。
+	if len(os.Args) > 1 && agentcli.IsCommand(os.Args[1]) {
+		attachParentConsole()
+		self, _ := os.Executable()
+		os.Exit(agentcli.Main(os.Args[1:], agentcli.Options{AppExe: self}))
+	}
 	noWindow := flag.Bool("no-window", false, "不打开窗口，只启动后台服务（调试用）")
 	uiPort := flag.Int("port", defaultUIPort, "本地界面端口")
 	dataDirFlag := flag.String("data-dir", "", "数据目录（默认为用户配置目录）")
@@ -213,7 +224,27 @@ func main() {
 	fwAction := flag.String("firewall-rules", "", "add | remove：写入/删除 Windows 防火墙规则（需管理员，由设置页通过 UAC 调用）")
 	fwPublic := flag.Bool("firewall-public", false, "防火墙规则同时允许公用网络")
 	fwAria2 := flag.String("firewall-aria2", "", "同时放行的 aria2c.exe 路径")
+	fwDry := flag.Bool("firewall-dry-run", false, "只打印「添加防火墙规则」会执行的 netsh 命令（不提权、不修改）")
 	flag.Parse()
+	if *fwDry {
+		exe, _ := os.Executable()
+		aria := *fwAria2
+		if aria == "" {
+			if d, err := os.UserConfigDir(); err == nil {
+				aria = filepath.Join(d, appName, "bin", "aria2c.exe")
+			}
+		}
+		fmt.Printf("elevate (UAC, runas): \"%s\" --firewall-rules=add --firewall-aria2=\"%s\"\n", exe, aria)
+		cmds, err := firewallNetshCommands("add", *fwPublic, exe, aria)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		for _, c := range cmds {
+			fmt.Println("netsh " + c)
+		}
+		return
+	}
 	if *fwAction != "" {
 		if err := applyFirewallRules(*fwAction, *fwPublic, *fwAria2); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -281,6 +312,8 @@ func main() {
 	port := ln.Addr().(*net.TCPAddr).Port
 	app.uiToken = randHex(16)
 	_ = os.WriteFile(tokenPath, []byte(app.uiToken), 0600)
+	app.apiToken = loadOrCreateAPIToken(dataDir)
+	writeAPIPort(dataDir, port)
 	app.uiURL = fmt.Sprintf("http://127.0.0.1:%d/?t=%s", port, app.uiToken)
 
 	exe, err := findAria2(dataDir, *aria2Path)
