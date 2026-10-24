@@ -216,3 +216,60 @@ func TestBTLogFilterDropsHashNoise(t *testing.T) {
 		t.Fatalf("real warnings dropped:\n%s", out)
 	}
 }
+
+func TestBTLogFilterRateLimitsWebseedErrors(t *testing.T) {
+	btWebseedLogAt.Store(0)
+	var buf bytes.Buffer
+	l := slog.New(btLogFilter{slog.NewTextHandler(&buf, nil)})
+	for i := 0; i < 50; i++ {
+		l.Warn("webseed request error", "n", i)
+	}
+	if c := strings.Count(buf.String(), "webseed request error"); c != 1 {
+		t.Fatalf("want 1 webseed line, got %d", c)
+	}
+}
+
+func TestHTMLGuardDeletesAgainAfterRestart(t *testing.T) {
+	dir := t.TempDir()
+	dl := t.TempDir()
+	p := filepath.Join(dl, "File%3AMovie.ogv")
+	html := []byte("<!DOCTYPE html><html><body>wiki page</body></html>")
+	mk := func(gid string) *guardStatus {
+		st := &guardStatus{GID: gid, Status: "complete", TotalLength: "50", Completed: "50"}
+		st.Files = append(st.Files, struct {
+			Path string `json:"path"`
+			Uris []struct {
+				URI string `json:"uri"`
+			} `json:"uris"`
+		}{Path: p})
+		st.Files[0].Uris = append(st.Files[0].Uris, struct {
+			URI string `json:"uri"`
+		}{URI: "https://commons.wikimedia.org/wiki/File:Movie.ogv"})
+		return st
+	}
+	a := &App{dataDir: dir, res: newResilience()}
+	a.loadTaskMeta()
+	if err := os.WriteFile(p, html, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a.checkCompletedHTTP(mk("h1"))
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Fatal("html file not deleted on first detection")
+	}
+	if _, ok := a.forcedError("h1"); !ok {
+		t.Fatal("task not marked as error")
+	}
+	// 重启：新进程、guards.checked 清空，aria2 按旧会话又把网页下了一遍
+	guards.mu.Lock()
+	delete(guards.checked, "h1")
+	guards.mu.Unlock()
+	b := &App{dataDir: dir, res: newResilience()}
+	b.loadTaskMeta()
+	if err := os.WriteFile(p, html, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b.checkCompletedHTTP(mk("h1"))
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Fatal("re-downloaded html file not deleted after restart")
+	}
+}

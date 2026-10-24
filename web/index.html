@@ -1157,6 +1157,12 @@ async function refreshDetails() {
     if ($("#mDet").classList.contains("on")) $("#detBody").innerHTML = '<div class="floading err">' + esc(e.message) + '</div>';
   }
 }
+// 详情页的状态用中文（以前直接显示 aria2 的 complete/active 等英文状态）
+function detStatusText(gid, o) {
+  const t = tasks.find(x => x.gid === gid);
+  if (t) return statusText(t)[2];
+  return o.status ? statusText({status: o.status, engine: o.engine, errorMessage: o.errorMessage})[2] : "";
+}
 function renderDetails(j) {
   const warn = j.warning ? '<div class="hint" style="color:var(--warn);margin-bottom:8px">' + esc(j.warning) + '</div>' : '';
   if (j.tab === "overview") {
@@ -1167,7 +1173,7 @@ function renderDetails(j) {
     $("#detBody").innerHTML = warn + '<div class="kv">' +
       '<b>名称</b><span>' + esc(o.name || taskName(tasks.find(t => t.gid === j.gid) || {}) || j.gid) + '</span>' +
       '<b>引擎</b><span>' + esc(o.engineLabel || o.engine || "") + '</span>' +
-      '<b>状态</b><span>' + esc(o.status || "") + '</span>' +
+      '<b>状态</b><span>' + esc(detStatusText(j.gid, o)) + '</span>' +
       '<b>大小</b><span>' + fmtSize(o.totalLength) + '（已完成 ' + fmtSize(o.completedLength) + '，' + pct + '）</span>' +
       '<b>速度</b><span>↓ ' + fmtSize(o.downloadSpeed) + '/s　↑ ' + fmtSize(o.uploadSpeed) + '/s　ETA ' + eta + '</span>' +
       '<b>连接</b><span>连接 ' + (o.connections || 0) + '　种子 ' + (o.numSeeders || 0) + (o.btListenPort ? '　监听 ' + o.btListenPort : '') + '</span>' +

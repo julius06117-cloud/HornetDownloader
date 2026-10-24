@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	g "github.com/anacrolix/generics"
@@ -1414,7 +1415,21 @@ func (e *BTEngine) URIs() []string {
 
 type btLogFilter struct{ slog.Handler }
 
+// webseed 失败（例如种子里的 HTTP 种子地址已 404）每个分块都会报一次，
+// 一分钟可达上百行；这里每分钟只记一条。
+var btWebseedLogAt atomic.Int64
+
 func (h btLogFilter) Handle(ctx context.Context, r slog.Record) error {
+	if r.Message == "webseed request error" {
+		now := r.Time.UnixNano()
+		if now == 0 {
+			now = time.Now().UnixNano()
+		}
+		last := btWebseedLogAt.Load()
+		if now-last < int64(time.Minute) || !btWebseedLogAt.CompareAndSwap(last, now) {
+			return nil
+		}
+	}
 	if r.Message == "finished hashing piece" {
 		correct, shortWrite := false, false
 		r.Attrs(func(a slog.Attr) bool {

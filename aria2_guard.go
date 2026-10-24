@@ -294,9 +294,7 @@ func (a *App) checkCompletedHTTP(st *guardStatus) {
 			log.Println("已清理完成任务残留的控制文件", p+".aria2")
 		}
 	}
-	if _, ok := a.forcedError(st.GID); ok {
-		return
-	}
+	_, already := a.forcedError(st.GID)
 	src := ""
 	if len(st.Files[0].Uris) > 0 {
 		src = st.Files[0].Uris[0].URI
@@ -317,6 +315,16 @@ func (a *App) checkCompletedHTTP(st *guardStatus) {
 	fi, _ := f.Stat()
 	f.Close()
 	if n == 0 || !looksLikeHTML(head[:n]) {
+		return
+	}
+	if already {
+		// 已判过失败的任务：aria2 开着 --force-save，重启后会按旧会话把这个网页再下一遍，
+		// 这里再删掉，不让假文件留在下载目录里。
+		if fi != nil && fi.Size() < 16<<20 {
+			_ = os.Remove(p)
+		}
+		_ = os.Remove(p + ".aria2")
+		log.Printf("%s：重新出现的 HTML 假文件已删除（%s）", st.GID, p)
 		return
 	}
 	a.setForcedError(st.GID, htmlTrapMsg)
