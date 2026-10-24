@@ -2,7 +2,7 @@
 
 ## 环境（已在 Home 配好）
 
-- Go 1.22+（本机为 1.26.1），`CGO_ENABLED=0`
+- Go 1.26（`go.mod` 固定 `toolchain go1.26.10`，`GOTOOLCHAIN=auto` 时会经 goproxy.cn 自动拉取；**不要用 1.26.0/1.26.1**：Windows 上 UDP 栈损坏会让程序在 BT 负载下崩溃），`CGO_ENABLED=0`
 - Git、Node（UI 脚本检查用）
 - WebView2 Runtime（随 Edge，本机已有）
 - `GOPROXY=https://goproxy.cn,direct`（国内拉模块）
@@ -45,3 +45,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -FromD
 - 应用没开时 CLI 会以 `--no-window` 无窗口启动后台实例；之后再双击 exe 会接到同一实例。
 - 退出码：0 成功、1 任务失败、2 参数错误、3 应用不可用、4 超时、5 添加被拒。
 - 发布前按 [`QA-CHECKLIST.md`](QA-CHECKLIST.md) 全量自测；发布用 `scripts\release.ps1`。
+
+## 诊断 / 隔离测试（v1.5.3）
+
+```powershell
+# 独立数据目录 + 端口，不碰日常实例；pprof 只开在回环地址
+.\build\HornetDownloader.exe --data-dir $env:USERPROFILE\dev\hdqa\data --port 16931 --pprof 127.0.0.1:6071
+Invoke-RestMethod http://127.0.0.1:6071/debug/mem          # heap / goroutines / BT 连接
+go version -m .\build\HornetDownloader.exe | Select -First 1   # 必须是 go1.26.10（或更新）
+```
+
+- 崩溃日志：`<数据目录>\crash-*.log`；上次日志 `app.prev.log`；内存心跳 `HORNET_MEMLOG_SEC`。
+- Home 上 `core.autocrlf=true`，`gofmt -l` 会因 CRLF 误报；以 `git diff` / CI 为准。

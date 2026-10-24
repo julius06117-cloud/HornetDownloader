@@ -12,7 +12,7 @@ It started as a personal gift for the owner's wife, so polish and "it just works
 - Ships as **one portable `HornetDownloader.exe`** (windows/amd64, `CGO_ENABLED=0`) plus the console companion `hdl.exe`, zipped as `dist\HornetDownloader-win64.zip`. Install path: `%LOCALAPPDATA%\Programs\HornetDownloader`.
 - Three download engines: **aria2** (embedded `aria2c.exe` 1.37.0, JSON-RPC), **BitTorrent** (pure-Go `github.com/anacrolix/torrent`), **yt-dlp** (sidecar process, downloaded on first use).
 - UI: single-page `web/index.html` served on `http://127.0.0.1:16801`, shown in a WebView2 window (fallback: Edge app window via `--browser`).
-- Go module name: `hornetdl`; Go 1.26; current version v1.5.2.
+- Go module name: `hornetdl`; Go 1.26 (built with **go1.26.10** via the `toolchain` line in `go.mod`); current version v1.5.3.
 
 ## Repository map
 
@@ -31,6 +31,9 @@ It started as a personal gift for the owner's wife, so polish and "it just works
 | `resilience.go` | "UI never waits on aria2": background task poller + cache (`/api/tasks`), single action queue (`/api/action`), paged file list (`/api/files`, 500/page), `/api/startbt`, UI log + heartbeat watchdog |
 | `bt_engine.go` | BitTorrent engine (anacrolix): listens 6881–6999, UPnP/NAT-PMP on, tracker re-announce, part files + map piece completion, `kickDownloadLocked`, reselect, session `bt-session.json` |
 | `ytdlp_engine.go` | yt-dlp sidecar: uses `bin\yt-dlp.exe`, then PATH, else downloads it (GitHub, then ghproxy mirror) |
+| `diag.go`, `diag_windows.go` | Diagnostics (v1.5.3): `crash-*.log` via `debug.SetCrashOutput`, `app.prev.log`, unclean-exit detection, memory heartbeat, opt-in loopback pprof + `/debug/mem`, bad-toolchain warning |
+| `taskmeta.go` | `task-meta.json`: created time, removed-task tombstones, app-detected errors (HTML guard), UA-retry aliases |
+| `aria2_guard.go` | aria2 guard: 403/418 → retry once with `userAgentFallback`; HTML-instead-of-file guard; tombstone cleanup; `.aria2` cleanup |
 | `details.go` | `/api/details` (tabs: overview / files / trackers / peers) and `/api/reselect` for all engines |
 | `artifacts.go` | Paths of downloaded artifacts (open folder etc.) |
 | `heartbeat.go` | Browser-window mode: exit when UI stops pinging |
@@ -54,7 +57,7 @@ It started as a personal gift for the owner's wife, so polish and "it just works
 | `DEV.md` | Local Home dev environment and daily commands |
 | `README.zh-CN.txt` | End-user manual, shipped as `README.txt` in the zip |
 
-Runtime data: `%APPDATA%\HornetDownloader\` → `config.json`, `app.log`, `aria2.log`, `aria2.session`, `bt-session.json`, `api-token`, `api-port`, `task-source.json`, `bin\` (aria2c, yt-dlp). Never commit any of these.
+Runtime data: `%APPDATA%\HornetDownloader\` → `config.json`, `app.log`, `app.prev.log`, `crash-*.log`, `task-meta.json`, `bt\meta\`, `aria2.log`, `aria2.session`, `bt-session.json`, `api-token`, `api-port`, `task-source.json`, `bin\` (aria2c, yt-dlp). Never commit any of these.
 
 ## Engine routing (do not regress)
 
@@ -145,6 +148,10 @@ hdl pause|resume <id> ; hdl remove <id> --delete-files
 ## Invariants & gotchas
 
 - **Keep `CGO_ENABLED=0`.** No DLLs, no cgo libtorrent. Single-exe portability is a hard requirement.
+- **Toolchain ≥ go1.26.2 (pinned `toolchain go1.26.10`).** go1.26.0/1.26.1 corrupt goroutine stacks during overlapped UDP I/O on Windows (golang/go#77975, fixed by #78041). Under BT load (DHT / UDP trackers) that killed the app with `0xc0000005` within minutes — the v1.5.x "silent exit". Do not lower the `toolchain` line; `TestToolchainNotAffectedByWindowsUDPStackBug` fails and the app logs a `[diag]` warning on an affected toolchain. Check with `go version -m build\HornetDownloader.exe`.
+- **Diagnostics:** the release exe is `-H windowsgui` (no stderr), so Go fatal errors go to `<data>\crash-<time>.log` (`debug.SetCrashOutput`); `app.log` of the previous run is kept as `app.prev.log`. `--pprof 127.0.0.1:6061` (or `HORNET_PPROF`, loopback only) serves `/debug/pprof/*` and `/debug/mem`; `HORNET_MEMLOG_SEC` changes the memory heartbeat (default 300 s); `GOMEMLIMIT` is honoured.
+- **IDs & times are stable:** BT ids are `bt-` + first 16 hex of the infohash (same after restart); created time lives in `task-meta.json` / `bt-session.json`. Speed is 0 for any task that is not `active`; BT speed counts useful bytes read from the network (re-hashing existing data after a restart is not speed).
+- **User-Agent:** default is honest `HornetDownloader/<version>`; never impersonate a browser by default. 403/418 retries once with `userAgentFallback` (default `Wget/1.21.4`).
 - **Never block the UI on aria2.** aria2 is single-threaded and can stall (e.g. big torrents). Read from the poller cache, put mutations on the action queue, use the slow pool for long calls. Do not put synchronous RPC back on request paths.
 - **Windows file allocation:** `Config.effectiveFileAllocation()` maps `auto` → `prealloc` on Windows. `none`/`trunc` on NTFS causes zero-fill stalls that freeze aria2 RPC ("aria2 响应超时"). Read that comment before changing it.
 - **BitTorrent:** keep part files + `NewMapPieceCompletion` (bolt DB locks files on Windows); keep tracker re-adds and `kickDownloadLocked`; don't disable downloading from write-error handlers.

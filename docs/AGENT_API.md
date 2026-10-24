@@ -4,7 +4,7 @@ HornetDownloader is an **agent-first Windows downloader**: one portable exe that
 
 - Engines: aria2 (HTTP/FTP), pure-Go BitTorrent (magnet / .torrent), yt-dlp (video sites).
 - Everything is local: UI/API bind to `127.0.0.1:16801`; embedded aria2c RPC is loopback-only.
-- Version covered here: **v1.5.2**. Machine-readable summary: `hdl help --json`.
+- Version covered here: **v1.5.3**. Machine-readable summary: `hdl help --json`.
 
 ## 1. Install (Windows x64)
 
@@ -31,7 +31,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $f -AddToPath -Json
 
 | Parameter | Default | Meaning |
 |-----------|---------|---------|
-| `-Version` | `latest` | or a tag like `v1.5.2` |
+| `-Version` | `latest` | or a tag like `v1.5.3` |
 | `-InstallDir` | `%LOCALAPPDATA%\Programs\HornetDownloader` | no admin rights needed |
 | `-Mirror` | (none) | URL prefix tried first, e.g. `https://ghfast.top/` (GitHub can be slow from mainland China) |
 | `-Retries` | `3` | per-URL retries with back-off |
@@ -129,7 +129,10 @@ hdl remove $id --delete-files
 - `followedBy`: aria2 magnet metadata tasks are followed by the real download; `wait`/`get` follow it automatically.
 - `peers` / `seeders`: BitTorrent peer and seeder counts (connections for HTTP).
 - `addedBy`: `agent` for CLI / `/api/v1/add`, `user` for UI, clipboard, file association.
-- Task ids: `bt-*` BitTorrent, `yt-*` yt-dlp, other hex ids aria2.
+- Task ids: `bt-*` BitTorrent, `yt-*` yt-dlp, other hex ids aria2. Since v1.5.3 BitTorrent ids are derived from the infohash (`bt-` + 16 hex) and **stay the same across restarts**, so stored ids keep working.
+- `speedBps` is 0 whenever `status` is not `active` (paused/waiting tasks never report a stale speed).
+- If an aria2 (HTTP) download turns out to be an HTML page instead of the file (e.g. a media wiki page), the task ends as `error` with a readable message, the bogus file is deleted and `hdl get` exits 1. Media pages such as `commons.wikimedia.org/wiki/File:…` are routed to yt-dlp by `auto`.
+- HTTP 403/418: the task is retried once with the fallback User-Agent; the new aria2 id is aliased, so the original id still resolves.
 
 ## 4. HTTP API (`/api/v1`)
 
@@ -155,11 +158,20 @@ Invoke-RestMethod "http://127.0.0.1:$port/api/v1/task?id=$($r.id)" -Headers $h
 
 `/api/v1/*` is the stable contract. Other `/api/*` routes serve the bundled UI and may change between versions.
 
-## 5. Networking & firewall
+## 5. Configuration & diagnostics (v1.5.3)
+
+- **User-Agent** (`config.json`, Settings → 下载): `userAgent` (empty = `HornetDownloader/<version>`, honest default) and `userAgentFallback` (used once after HTTP 403/418; default `Wget/1.21.4`, empty disables the retry). `clipboardWatch` (default true) turns the clipboard prompt on/off.
+- **Crash logs:** Go fatal errors are written to `%APPDATA%\HornetDownloader\crash-<yyyymmdd-hhmmss>.log`; the previous run's log is `app.prev.log`. After an unclean exit the next start logs a `[diag]` line in `app.log`.
+- **Memory:** `app.log` gets a `[mem]` heartbeat every 5 min (`HORNET_MEMLOG_SEC=<seconds>` to change); if working set or private memory first exceeds 1 GiB, one `heap-<time>.pb.gz` snapshot is written to the data dir. `GOMEMLIMIT` is honoured.
+- **pprof (opt-in):** `HornetDownloader.exe --pprof 127.0.0.1:6061` or env `HORNET_PPROF=127.0.0.1:6061` (loopback only) serves `/debug/pprof/*` and `/debug/mem` (JSON: heap, sys, goroutines, BT connections).
+- **Persisted metadata:** `task-meta.json` (created times, removed-task tombstones, app-detected errors, UA-retry aliases) and `bt\meta\<infohash>.torrent` (BT metadata cache, deleted with the task).
+- Toolchain: release builds use Go 1.26.10. Go 1.26.0/1.26.1 crash on Windows under UDP load (golang/go#77975); don't build with them.
+
+## 6. Networking & firewall
 
 - UI/API: `127.0.0.1:16801` only. aria2c JSON-RPC: loopback only, DHT/PEX/LPD off, so idle aria2 opens no public port.
 - The BitTorrent engine listens on one stable port (`Config.BTPort`, 6881–6999, TCP+UDP) on all interfaces, as BitTorrent needs inbound peers. Windows asks once; Settings → 防火墙 can add an allow rule for the **private** profile (optionally public). That button elevates through **UAC** (never silently). `HornetDownloader.exe --firewall-dry-run` prints the exact `netsh` commands without changing anything.
 
-## 6. Legal use
+## 7. Legal use
 
 Use HornetDownloader only for content you are allowed to download (Linux ISOs, your own torrents, public files, CC-licensed video). License: MIT; bundled aria2c is GPL-2.0-or-later — see `LICENSE` and `THIRD_PARTY_NOTICES.md`.

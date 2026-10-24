@@ -18,7 +18,7 @@
   .\install.ps1 -Mirror https://ghfast.top/ -Retries 5     # slow GitHub access (mainland China)
 #>
 param(
-  [string]$Version = "latest",          # "latest" or a tag such as v1.5.2
+  [string]$Version = "latest",          # "latest" or a tag such as v1.5.3
   [string]$InstallDir = (Join-Path $env:LOCALAPPDATA "Programs\HornetDownloader"),
   [string]$Mirror = "",                 # optional URL prefix, e.g. https://ghfast.top/
   [int]$Retries = 3,
