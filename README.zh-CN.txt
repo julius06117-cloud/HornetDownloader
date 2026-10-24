@@ -1,4 +1,4 @@
-Hornet 下载器 v1.5.3（Windows 64 位 · 多引擎便携版）
+Hornet 下载器 v1.5.4（Windows 64 位 · 多引擎便携版）
 ================================================
 
 没有广告、没有数据上报的下载工具。内嵌多个下载引擎，解压后只需一个
@@ -43,6 +43,15 @@ HornetDownloader.exe 即可运行（yt-dlp 首次使用视频站链接时再下�
 - 手动指定引擎失败时不再偷偷换成 aria2；同一磁力已在列表时返回已有任务，不会再添加一份 aria2。
 - 仅「自动/默认」且 BitTorrent 因其它原因失败时，才回退 aria2，并在提示里写明原因。
 
+修正（v1.5.4）：
+- 下载到网页（HTML）而判为失败的任务，重启后不再被 aria2 重新下载一遍；任务仍显示为失败，
+  可以删除，也可以「重新开始」（按原链接重新下载）。v1.5.3 留下的这类任务会自动转换。
+- 添加 .torrent 种子时，不再往下载文件夹里复制一份 .torrent；种子保存在
+  %APPDATA%\HornetDownloader\bt\meta\ 里，删除任务时一起删除。
+  旧版本留在下载文件夹里的 .torrent 不会被动；删除任务并勾选删除文件时照旧一并删除。
+- 新增 hdl version（加 --json 输出 JSON）：显示 hdl 版本、正在运行的程序版本（不会启动程序）、
+  Go 工具链版本和构建所用的提交。
+
 稳定性与修正（v1.5.3）：
 - 修复「用着用着程序自己消失」：原因是旧版用的 Go 1.26.1 在 Windows 上收发 UDP（BT 的
   DHT / Tracker）时会损坏内存，BT 下载一忙就直接崩溃退出。现改用 Go 1.26.10 构建，
@@ -70,7 +79,7 @@ HornetDownloader.exe 即可运行（yt-dlp 首次使用视频站链接时再下�
   程序没打开时会在后台无窗口启动；之后双击 exe 打开的是同一个实例。
 - 命令行或脚本添加的任务在列表里带「Agent」标记，左侧「来源」可筛选「我添加的 / Agent 添加的」。
 - 详细说明：https://github.com/julius06117-cloud/HornetDownloader/blob/main/docs/AGENT_API.md
-- 删除 BT 任务并勾选删除文件时，未下载完的 .part 文件与程序保存的 .torrent 副本也会删除
+- 删除 BT 任务并勾选删除文件时，未下载完的 .part 文件与旧版保存的 .torrent 副本也会删除
   （如果文件仍被占用，会在下次启动时删除）。
 - 许可：MIT（见 LICENSE.txt）；第三方组件见 THIRD_PARTY_NOTICES.md 与 licenses 文件夹。
 

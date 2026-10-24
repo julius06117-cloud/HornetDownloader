@@ -4,7 +4,7 @@ HornetDownloader is an **agent-first Windows downloader**: one portable exe that
 
 - Engines: aria2 (HTTP/FTP), pure-Go BitTorrent (magnet / .torrent), yt-dlp (video sites).
 - Everything is local: UI/API bind to `127.0.0.1:16801`; embedded aria2c RPC is loopback-only.
-- Version covered here: **v1.5.3**. Machine-readable summary: `hdl help --json`.
+- Version covered here: **v1.5.4**. Machine-readable summary: `hdl help --json`.
 
 ## 1. Install (Windows x64)
 
@@ -71,6 +71,7 @@ hdl list   [--json]
 hdl remove <id> [--delete-files] [--json]
 hdl pause  <id> [--json]
 hdl resume <id> [--json]
+hdl version [--json]
 hdl help   [--json]
 common: --data-dir D (default %APPDATA%\HornetDownloader)  --port N  --no-start
 ```
@@ -81,6 +82,30 @@ common: --data-dir D (default %APPDATA%\HornetDownloader)  --port N  --no-start
 - `--timeout` takes Go durations (`90s`, `30m`, `2h`). On timeout the task keeps running; the JSON still contains its `id`.
 - **Autostart:** if the app is not running, the CLI starts it headless (`HornetDownloader.exe --no-window`: no window, no focus steal, tray-less) and waits up to 45 s for the API. `--no-start` disables this (exit 3 instead). If the user later opens the GUI, it attaches to the running instance.
 - The exe is found via `HORNETDL_EXE`, then next to `hdl.exe`, then `%LOCALAPPDATA%\Programs\HornetDownloader\`.
+
+### Version (v1.5.4)
+
+`hdl version` (also `hdl --version`) prints the hdl version, the version of the running app (it **never starts** the app; `not running` otherwise), the Go toolchain and the git commit the binary was built from. It always exits 0.
+
+```
+hdl     1.5.4
+app     1.5.4 (running, pid 1234, port 16801)
+go      go1.26.10
+commit  0123456789ab 2026-10-25T08:00:00Z
+os      windows/amd64
+```
+
+`hdl version --json`:
+
+```json
+{
+  "hdl": "1.5.4",
+  "build": {"go": "go1.26.10", "commit": "<full sha>", "commitTime": "2026-10-25T08:00:00Z", "modified": false, "os": "windows", "arch": "amd64"},
+  "app": {"running": true, "version": "1.5.4", "go": "go1.26.10", "commit": "<full sha>", "pid": 1234, "port": 16801}
+}
+```
+
+`app.running` is false (with `app.error`) when the app is not reachable; `--data-dir` / `--port` select which instance to ask.
 
 ### Exit codes
 
@@ -131,7 +156,7 @@ hdl remove $id --delete-files
 - `addedBy`: `agent` for CLI / `/api/v1/add`, `user` for UI, clipboard, file association.
 - Task ids: `bt-*` BitTorrent, `yt-*` yt-dlp, other hex ids aria2. Since v1.5.3 BitTorrent ids are derived from the infohash (`bt-` + 16 hex) and **stay the same across restarts**, so stored ids keep working.
 - `speedBps` is 0 whenever `status` is not `active` (paused/waiting tasks never report a stale speed).
-- If an aria2 (HTTP) download turns out to be an HTML page instead of the file (e.g. a media wiki page), the task ends as `error` with a readable message, the bogus file is deleted and `hdl get` exits 1. Media pages such as `commons.wikimedia.org/wiki/File:…` are routed to yt-dlp by `auto`.
+- If an aria2 (HTTP) download turns out to be an HTML page instead of the file (e.g. a media wiki page), the task ends as `error` with a readable message, the bogus file is deleted and `hdl get` exits 1. Since v1.5.4 such a task is also taken out of aria2's session, so it is **not downloaded again on restart**; it stays in the list as `error` (same id) and can still be removed or retried (retry adds the original URL again; the old id is aliased to the new task). Tasks that failed this way under v1.5.3 are converted the next time aria2 re-fetches them. Media pages such as `commons.wikimedia.org/wiki/File:…` are routed to yt-dlp by `auto`.
 - HTTP 403/418: the task is retried once with the fallback User-Agent; the new aria2 id is aliased, so the original id still resolves.
 
 ## 4. HTTP API (`/api/v1`)
@@ -142,7 +167,7 @@ Base URL `http://127.0.0.1:<port>` (default port 16801; the current port is writ
 
 | Method & path | Body / query | Response |
 |---------------|--------------|----------|
-| `GET /api/v1/ping` | — | `{ok, app:"HornetDownloader", version, pid}` |
+| `GET /api/v1/ping` | — | `{ok, app:"HornetDownloader", version, pid, go, commit}` (`go`/`commit` since v1.5.4) |
 | `POST /api/v1/add` | `{url}` or `{torrentB64, name}`; optional `dir` (absolute), `engine` (`auto`/`aria2`/`bt`/`ytdlp`), `selectFiles` (default false: download all), `force` | `{id, engine, recommended, existing, fallback, dir}`; 400 bad input, 422 engine rejected |
 | `GET /api/v1/task?id=ID` | — | task object; 404 if unknown (tasks appear within ~1 s after add) |
 | `GET /api/v1/tasks` | — | `{tasks:[task...]}` |
@@ -158,13 +183,13 @@ Invoke-RestMethod "http://127.0.0.1:$port/api/v1/task?id=$($r.id)" -Headers $h
 
 `/api/v1/*` is the stable contract. Other `/api/*` routes serve the bundled UI and may change between versions.
 
-## 5. Configuration & diagnostics (v1.5.3)
+## 5. Configuration & diagnostics (v1.5.3+)
 
 - **User-Agent** (`config.json`, Settings → 下载): `userAgent` (empty = `HornetDownloader/<version>`, honest default) and `userAgentFallback` (used once after HTTP 403/418; default `Wget/1.21.4`, empty disables the retry). `clipboardWatch` (default true) turns the clipboard prompt on/off.
 - **Crash logs:** Go fatal errors are written to `%APPDATA%\HornetDownloader\crash-<yyyymmdd-hhmmss>.log`; the previous run's log is `app.prev.log`. After an unclean exit the next start logs a `[diag]` line in `app.log`.
 - **Memory:** `app.log` gets a `[mem]` heartbeat every 5 min (`HORNET_MEMLOG_SEC=<seconds>` to change); if working set or private memory first exceeds 1 GiB, one `heap-<time>.pb.gz` snapshot is written to the data dir. `GOMEMLIMIT` is honoured.
 - **pprof (opt-in):** `HornetDownloader.exe --pprof 127.0.0.1:6061` or env `HORNET_PPROF=127.0.0.1:6061` (loopback only) serves `/debug/pprof/*` and `/debug/mem` (JSON: heap, sys, goroutines, BT connections).
-- **Persisted metadata:** `task-meta.json` (created times, removed-task tombstones, app-detected errors, UA-retry aliases) and `bt\meta\<infohash>.torrent` (BT metadata cache, deleted with the task).
+- **Persisted metadata:** `task-meta.json` (created times, removed-task tombstones, app-detected errors, UA-retry aliases) and `bt\meta\<infohash>.torrent` (BT metadata cache, deleted with the task). Since v1.5.4 a `.torrent` you add is stored there too — **no `.torrent` copy is written to the download folder** any more. Copies left in the download folder by v1.5.3 are not touched; they are still deleted together with the task when you remove it with “delete files”.
 - Toolchain: release builds use Go 1.26.10. Go 1.26.0/1.26.1 crash on Windows under UDP load (golang/go#77975); don't build with them.
 
 ## 6. Networking & firewall

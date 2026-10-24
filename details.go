@@ -262,6 +262,22 @@ func (a *App) detailsOverview(gid, eng string) map[string]any {
 		}
 	default:
 		var st map[string]any
+		if p, ok := a.parked(gid); ok {
+			st = p.snapshot(gid)
+			ov["status"] = st["status"]
+			ov["totalLength"] = st["totalLength"]
+			ov["completedLength"] = "0"
+			ov["downloadSpeed"] = "0"
+			ov["uploadSpeed"] = "0"
+			ov["connections"] = "0"
+			ov["dir"] = p.Dir
+			ov["errorMessage"] = p.Msg
+			ov["name"] = p.Path
+			if len(p.URIs) > 0 {
+				ov["link"] = p.URIs[0]
+			}
+			return ov
+		}
 		raw, err := a.aria.CallRawTimeout("aria2.tellStatus", []any{gid}, 4*time.Second)
 		if err != nil {
 			ov["warning"] = err.Error()

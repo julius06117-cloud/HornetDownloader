@@ -5,7 +5,7 @@
 
 **面向读者**：本文件优先给 coding agent / 维护者。代理协作约定见 [`AGENTS.md`](AGENTS.md)；自动化接口（CLI / API / 安装）见 [`docs/AGENT_API.md`](docs/AGENT_API.md)；终端用户说明见打包内的 `README.zh-CN.txt`；本机环境见 `DEV.md`。
 
-当前版本：**v1.5.3** · 模块名 `hornetdl` · Go **1.26.10+**（`go.mod` 的 `toolchain` 行；1.26.0/1.26.1 在 Windows 上有 UDP 栈损坏崩溃，见 AGENTS.md） · **`CGO_ENABLED=0`**（必须保持，便于单文件分发）。
+当前版本：**v1.5.4** · 模块名 `hornetdl` · Go **1.26.10+**（`go.mod` 的 `toolchain` 行；1.26.0/1.26.1 在 Windows 上有 UDP 栈损坏崩溃，见 AGENTS.md） · **`CGO_ENABLED=0`**（必须保持，便于单文件分发）。
 
 ---
 
@@ -166,6 +166,7 @@ hdl wait   <id> [--json] [--timeout 30m]
 hdl status <id> [--json]
 hdl list   [--json]
 hdl remove <id> [--delete-files]   ·   hdl pause|resume <id>
+hdl version [--json]               # hdl / 正在运行的程序版本（不会启动程序）、Go 工具链、提交
 hdl help   --json                  # 机器可读的命令 / 退出码清单
 ```
 

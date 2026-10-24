@@ -683,6 +683,9 @@ func (a *App) pauseOne(gid string) error {
 		}
 		return a.yt.Pause(gid)
 	default:
+		if _, ok := a.parked(gid); ok {
+			return fmt.Errorf("任务已失败（下载到的是网页），无法暂停；可删除或「重新开始」")
+		}
 		if _, err := a.aria.CallRawTimeout("aria2.forcePause", []any{gid}, 30*time.Second); err != nil {
 			_, err2 := a.aria.CallRawTimeout("aria2.pause", []any{gid}, 30*time.Second)
 			if err2 == nil {
@@ -708,6 +711,9 @@ func (a *App) unpauseOne(gid string) error {
 		}
 		return a.yt.Unpause(gid)
 	default:
+		if _, ok := a.parked(gid); ok {
+			return fmt.Errorf("任务已失败（下载到的是网页），请用「重新开始」")
+		}
 		_, err := a.aria.CallRawTimeout("aria2.unpause", []any{gid}, startBTTimeout)
 		if err == nil {
 			a.saveAriaSessionSoon()

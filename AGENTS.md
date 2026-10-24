@@ -12,7 +12,7 @@ It started as a personal gift for the owner's wife, so polish and "it just works
 - Ships as **one portable `HornetDownloader.exe`** (windows/amd64, `CGO_ENABLED=0`) plus the console companion `hdl.exe`, zipped as `dist\HornetDownloader-win64.zip`. Install path: `%LOCALAPPDATA%\Programs\HornetDownloader`.
 - Three download engines: **aria2** (embedded `aria2c.exe` 1.37.0, JSON-RPC), **BitTorrent** (pure-Go `github.com/anacrolix/torrent`), **yt-dlp** (sidecar process, downloaded on first use).
 - UI: single-page `web/index.html` served on `http://127.0.0.1:16801`, shown in a WebView2 window (fallback: Edge app window via `--browser`).
-- Go module name: `hornetdl`; Go 1.26 (built with **go1.26.10** via the `toolchain` line in `go.mod`); current version v1.5.3.
+- Go module name: `hornetdl`; Go 1.26 (built with **go1.26.10** via the `toolchain` line in `go.mod`); current version v1.5.4.
 
 ## Repository map
 
@@ -20,7 +20,7 @@ It started as a personal gift for the owner's wife, so polish and "it just works
 |------|----------------|
 | `main.go` | Entry point, `Config` + defaults, CLI flags (`--no-window`, `--firewall-dry-run`, …), CLI sub-command dispatch to `internal/agentcli`, data dir, single instance / inbox hand-off, app wiring |
 | `agent_api.go` | Automation API `/api/v1/*` (ping/add/task/tasks/pause/resume/remove), persistent `api-token` + `api-port`, agent task view, idempotent add, `addedBy` source tags (`task-source.json`) |
-| `internal/agentcli/` | CLI `get/add/wait/status/list/remove/pause/resume/help` (JSON, exit codes, headless autostart); shared by `HornetDownloader.exe <cmd>` and `cmd/hdl` |
+| `internal/agentcli/` | CLI `get/add/wait/status/list/remove/pause/resume/version/help`; `version.go` holds the shared `Version` constant (`AppVersion` in package main refers to it) and build info (`runtime/debug` vcs.revision) (JSON, exit codes, headless autostart); shared by `HornetDownloader.exe <cmd>` and `cmd/hdl` |
 | `cmd/hdl/` | `hdl.exe`: console-subsystem companion for scripts (PowerShell waits for it and captures stdout) |
 | `console_windows.go` | `AttachConsole(ATTACH_PARENT_PROCESS)` so the GUI exe can print CLI output |
 | `firewall_cmds.go` | Pure `netsh` command construction (tested; used by the UAC path and `--firewall-dry-run`) |
@@ -131,6 +131,7 @@ hdl help --json                                            # machine-readable co
 hdl get <url|magnet|file.torrent> --dir D:\dl --json       # add + wait; exit 0 ok, 1 failed, 2 usage, 3 app unavailable, 4 timeout, 5 rejected
 hdl add <url> --dir D:\dl --json ; hdl wait <id> --json ; hdl status <id> --json ; hdl list --json
 hdl pause|resume <id> ; hdl remove <id> --delete-files
+hdl version --json                                         # hdl + running app version (never starts it), Go toolchain, commit
 ```
 
 - If the app is not running, the CLI starts it headless (`--no-window`); a later GUI launch attaches to it.

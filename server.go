@@ -316,6 +316,9 @@ func (a *App) handleDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) deleteOne(gid string, deleteFiles bool) error {
+	if a.deleteParked(gid) {
+		return nil
+	}
 	var st ariaStatus
 	if err := a.aria.Call("aria2.tellStatus", []any{gid}, &st); err != nil {
 		return err
@@ -471,6 +474,9 @@ func (a *App) retryOne(gid string) error {
 	}
 	if a.yt != nil && a.yt.Has(gid) {
 		_, err := a.yt.Retry(gid)
+		return err
+	}
+	if _, ok, err := a.retryParked(gid); ok {
 		return err
 	}
 	var st retryStatus
@@ -704,6 +710,8 @@ func (a *App) fetchTasks() (any, error) {
 			stat = map[string]any{}
 		}
 	} // end aria2 ok
+	// v1.5.4：已从 aria2 移走的失败任务（HTML 网页）照常显示为失败
+	stopped = append(stopped, a.parkedSnapshots()...)
 	if a.bt != nil {
 		for _, t := range a.bt.ListSnapshots() {
 			switch fmt.Sprint(t["status"]) {

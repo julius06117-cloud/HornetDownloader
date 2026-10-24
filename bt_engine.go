@@ -70,6 +70,7 @@ type btTask struct {
 	seeding     bool // 下完后仍在做种（SeedMinutes > 0）
 	seedUntil   time.Time
 	uploaded    int64
+	legacyCopy  string
 	// v1.5.3：节点页每个节点的上传速度按两次快照间的字节差计算。
 	// anacrolix 的 LastWriteUploadRate 是「最后一次写入」的瞬时速率，会出现单个节点几十 MB/s 的假值。
 	peerMu sync.Mutex
@@ -360,6 +361,7 @@ type btRestore struct {
 	GID         string
 	AddedAt     time.Time
 	CompletedAt time.Time
+	LegacyCopy  string // v1.5.3 及以前留在下载目录里的种子副本
 }
 
 func (e *BTEngine) AddMagnet(uri, dir string, selectFiles bool) (string, error) {
@@ -431,16 +433,49 @@ func (e *BTEngine) addTorrentBytes(raw []byte, name, dir string, selectFiles boo
 	if err != nil {
 		return "", err
 	}
-	if name == "" {
-		name = t.InfoHash().HexString() + ".torrent"
-	}
+	_ = name // v1.5.4 起不再按原文件名在下载目录里留副本
 	_ = os.MkdirAll(dir, 0755)
-	keep := filepath.Join(dir, name)
-	if rs == nil || !fileExists(keep) {
-		_ = os.WriteFile(keep, raw, 0600)
+	// v1.5.4：种子原文件保存在数据目录 meta\<infohash>.torrent（以前复制到下载目录，用户会看到一个多余的 .torrent）。
+	keep := e.storeTorrent(strings.ToLower(t.InfoHash().HexString()), raw)
+	if keep == "" {
+		e.saveMetainfo(t)
+		keep = e.metaPath(t.InfoHash().HexString())
 	}
-	e.saveMetainfo(t)
 	return e.register(t, dir, "file://"+keep, selectFiles, selected, rs)
+}
+
+// storeTorrent 把种子原文件写到数据目录（已存在则不覆盖）；返回路径，失败返回 ""。
+func (e *BTEngine) storeTorrent(ih string, raw []byte) string {
+	p := e.metaPath(ih)
+	if fileExists(p) {
+		return p
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
+		return ""
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0600); err != nil {
+		return ""
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		_ = os.Remove(tmp)
+		return ""
+	}
+	return p
+}
+
+// legacyTorrentCopy：v1.5.3 及以前的任务把种子副本放在下载目录里，会话里的 uri 指向它。
+// 恢复时改用数据目录里的副本；下载目录里的旧副本不动（可能是用户自己的文件），
+// 只在用户「删除任务和文件」时按以前的规则一起删。
+func legacyTorrentCopy(uri, dir string) string {
+	keep, ok := strings.CutPrefix(uri, "file://")
+	if !ok || !strings.HasSuffix(strings.ToLower(keep), ".torrent") || dir == "" {
+		return ""
+	}
+	if filepath.Clean(filepath.Dir(keep)) != filepath.Clean(dir) {
+		return ""
+	}
+	return keep
 }
 
 func fileExists(p string) bool {
@@ -479,6 +514,7 @@ func (e *BTEngine) register(t *torrent.Torrent, dir, uri string, selectFiles boo
 	}
 	if rs != nil {
 		task.completedAt = rs.CompletedAt
+		task.legacyCopy = rs.LegacyCopy
 	}
 	// 写盘失败时默认会 DisallowDataDownload，导致「有元数据但速度永远为 0」。
 	// 改为记录错误并保持可下，方便国内盘符/长路径场景自愈。
@@ -819,9 +855,10 @@ func (e *BTEngine) Remove(gid string, deleteFiles bool) error {
 		for _, p := range paths {
 			targets = append(targets, p, p+".part")
 		}
-		if keep, ok := strings.CutPrefix(task.uri, "file://"); ok && strings.HasSuffix(strings.ToLower(keep), ".torrent") &&
-			filepath.Clean(filepath.Dir(keep)) == filepath.Clean(task.dir) {
+		if keep := legacyTorrentCopy(task.uri, task.dir); keep != "" {
 			targets = append(targets, keep)
+		} else if task.legacyCopy != "" {
+			targets = append(targets, task.legacyCopy)
 		}
 		left := removeFilesRetry(targets, 3*time.Second)
 		if name != "" {
@@ -1230,6 +1267,8 @@ type btSessionItem struct {
 	// v1.5.3
 	AddedAt     int64 `json:"addedAt,omitempty"`     // unix 毫秒
 	CompletedAt int64 `json:"completedAt,omitempty"` // unix 毫秒；0 = 未完成
+	// v1.5.4：旧版本在下载目录里留的种子副本（uri 已改指数据目录）；删除任务和文件时一并删
+	LegacyCopy string `json:"legacyCopy,omitempty"`
 }
 
 func (e *BTEngine) saveSessionLocked() {
@@ -1238,7 +1277,7 @@ func (e *BTEngine) saveSessionLocked() {
 		it := btSessionItem{
 			GID: task.gid, URI: task.uri, Dir: task.dir, InfoHash: task.infoHash,
 			Paused: task.status == "paused", WantPick: task.wantPick,
-			AddedAt: task.addedAt.UnixMilli(),
+			AddedAt: task.addedAt.UnixMilli(), LegacyCopy: task.legacyCopy,
 		}
 		if !task.completedAt.IsZero() {
 			it.CompletedAt = task.completedAt.UnixMilli()
@@ -1304,6 +1343,10 @@ func (e *BTEngine) restoreSession() {
 			if rerr != nil {
 				log.Println("恢复 BT 任务失败:", rerr)
 				continue
+			}
+			rs.LegacyCopy = legacyTorrentCopy(it.URI, it.Dir)
+			if rs.LegacyCopy == "" {
+				rs.LegacyCopy = it.LegacyCopy
 			}
 			gid, aerr = e.addTorrentBytes(raw, filepath.Base(p), it.Dir, selectFiles, selected, rs)
 		default:

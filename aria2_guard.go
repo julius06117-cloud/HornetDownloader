@@ -65,6 +65,11 @@ func (a *App) applyAria2Overrides(list []map[string]any) []map[string]any {
 			a.kickGuard()
 			continue
 		}
+		if _, ok := a.parked(g); ok {
+			// 已停放（列表里由 parkedSnapshots 显示）；aria2 里还在说明旧会话又加载了它，交给 guardPass 移走
+			a.kickGuard()
+			continue
+		}
 		if fmt.Sprint(t["status"]) == "complete" && t["bittorrent"] == nil && !guardChecked(g) {
 			// 刚完成的 HTTP 任务先就地做 HTML 检查再报告「完成」，否则 hdl get / wait
 			// 会在后台检查（最多 10 秒后）判失败之前就以成功退出。
@@ -131,6 +136,11 @@ func (a *App) guardPass() {
 			continue
 		}
 		if st.Bittorrent != nil {
+			continue
+		}
+		if _, ok := a.parked(st.GID); ok && st.Status != "complete" {
+			// 旧会话又加载了停放的任务（还没下完或出错）：直接移走；下完的走 checkCompletedHTTP 删网页
+			a.dropFromAria2(st.GID)
 			continue
 		}
 		switch st.Status {
@@ -325,6 +335,13 @@ func (a *App) checkCompletedHTTP(st *guardStatus) {
 		}
 		_ = os.Remove(p + ".aria2")
 		log.Printf("%s：重新出现的 HTML 假文件已删除（%s）", st.GID, p)
+		// v1.5.3 留下的失败任务：这次顺便停放，以后重启不再下载
+		msg, _ := a.forcedError(st.GID)
+		if _, ok := a.parked(st.GID); !ok {
+			a.parkFailedHTTP(st, msg)
+		} else {
+			a.dropFromAria2(st.GID)
+		}
 		return
 	}
 	a.setForcedError(st.GID, htmlTrapMsg)
@@ -332,7 +349,7 @@ func (a *App) checkCompletedHTTP(st *guardStatus) {
 		_ = os.Remove(p)
 	}
 	_ = os.Remove(p + ".aria2")
-	a.saveTaskMeta()
+	a.parkFailedHTTP(st, htmlTrapMsg)
 	log.Printf("%s 下载到的是 HTML 网页而不是文件（%s），已判为失败", st.GID, src)
 	a.kickTasks()
 }

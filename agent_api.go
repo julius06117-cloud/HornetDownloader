@@ -17,10 +17,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"hornetdl/internal/agentcli"
 )
 
 // AppVersion 是发布版本号（与 README / 发布 zip 一致）。
-const AppVersion = "1.5.3"
+const AppVersion = agentcli.Version
 
 const (
 	apiTokenFile = "api-token"
@@ -199,7 +201,9 @@ func (a *App) agentTaskByID(id string) (agentTask, bool) {
 
 // GET /api/v1/ping：探活（不计入界面心跳）。
 func (a *App) handleV1Ping(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"ok": true, "app": appName, "version": AppVersion, "pid": os.Getpid()})
+	bi := agentcli.BuildInfo()
+	writeJSON(w, 200, map[string]any{"ok": true, "app": appName, "version": AppVersion, "pid": os.Getpid(),
+		"go": bi.Go, "commit": bi.Commit})
 }
 
 // GET /api/v1/tasks

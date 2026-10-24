@@ -60,8 +60,20 @@ func TestBTEngineRemoveDeletesPartFiles(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if _, err := os.Stat(filepath.Join(dlDir, "pack.torrent")); err != nil {
-		t.Fatalf("torrent copy not kept in download dir: %v", err)
+	// v1.5.4：下载目录里不能再出现 .torrent 副本，原文件存在数据目录 meta\ 下
+	if _, err := os.Stat(filepath.Join(dlDir, "pack.torrent")); !os.IsNotExist(err) {
+		t.Fatalf("torrent copy left in download dir: %v", err)
+	}
+	ih := mi.HashInfoBytes().HexString()
+	stored := e.metaPath(ih)
+	if _, err := os.Stat(stored); err != nil {
+		t.Fatalf("torrent not stored in data dir: %v", err)
+	}
+	e.mu.Lock()
+	uri := e.tasks[gid].uri
+	e.mu.Unlock()
+	if uri != "file://"+stored {
+		t.Fatalf("task uri = %q, want data-dir copy", uri)
 	}
 	// 模拟下载到一半：part files
 	_ = os.MkdirAll(filepath.Join(dlDir, "pack"), 0755)
@@ -78,6 +90,9 @@ func TestBTEngineRemoveDeletesPartFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(keepUser); err != nil {
 		t.Errorf("unrelated file was deleted: %v", err)
+	}
+	if _, err := os.Stat(stored); !os.IsNotExist(err) {
+		t.Errorf("data-dir torrent copy not removed with task")
 	}
 }
 

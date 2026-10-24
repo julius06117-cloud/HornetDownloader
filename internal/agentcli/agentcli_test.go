@@ -163,3 +163,51 @@ func TestWaitTimeout(t *testing.T) {
 		t.Fatalf("timeout: %d %q", code, out)
 	}
 }
+
+func TestVersionNotRunning(t *testing.T) {
+	dir := t.TempDir()
+	code, out, _ := run("version", "--data-dir", dir, "--port", "1")
+	if code != ExitOK || !strings.Contains(out, "hdl     "+Version) || !strings.Contains(out, "go      go") ||
+		!strings.Contains(out, "commit  ") || !strings.Contains(out, "not running") {
+		t.Fatalf("version plain: %d %q", code, out)
+	}
+	code, out, _ = run("version", "--json", "--data-dir", dir)
+	var v VersionInfo
+	if code != ExitOK || json.Unmarshal([]byte(out), &v) != nil || v.HDL != Version || v.App.Running ||
+		!strings.HasPrefix(v.Build.Go, "go") || v.Build.Commit == "" {
+		t.Fatalf("version --json: %d %q", code, out)
+	}
+	if code, out, _ = run("--version", "--data-dir", dir); code != ExitOK || !strings.Contains(out, Version) {
+		t.Fatalf("--version: %d %q", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "api-port")); !os.IsNotExist(err) {
+		t.Fatal("version must not start the app")
+	}
+}
+
+func TestVersionReportsRunningApp(t *testing.T) {
+	f := startFake(t, Task{ID: "g1", Status: "complete", Done: true, OK: true, Files: []string{}})
+	code, out, _ := run("version", "--json", "--data-dir", f.dir)
+	var v VersionInfo
+	if code != ExitOK || json.Unmarshal([]byte(out), &v) != nil || !v.App.Running || v.App.Version == "" || v.App.Port == 0 {
+		t.Fatalf("version --json with app: %d %q", code, out)
+	}
+	code, out, _ = run("version", "--data-dir", f.dir)
+	if code != ExitOK || !strings.Contains(out, "(running") {
+		t.Fatalf("version plain with app: %d %q", code, out)
+	}
+}
+
+func TestHelpListsVersion(t *testing.T) {
+	_, out, _ := run("help", "--json")
+	if !strings.Contains(out, `"name": "version"`) {
+		t.Fatal("help --json does not list version")
+	}
+	_, out, _ = run("help")
+	if !strings.Contains(out, "version [--json]") {
+		t.Fatal("usage does not list version")
+	}
+	if !IsCommand("version") {
+		t.Fatal("version not routed as a CLI command")
+	}
+}

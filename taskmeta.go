@@ -26,6 +26,8 @@ type taskMetaData struct {
 	Alias     map[string]string `json:"alias,omitempty"`
 	UARetried map[string]int64  `json:"uaRetried,omitempty"`
 	ErrAt     map[string]int64  `json:"errAt,omitempty"`
+	// v1.5.4：判为失败（HTML）后已从 aria2 移走的任务，见 parked.go
+	Parked map[string]parkedTask `json:"parked,omitempty"`
 }
 
 type taskMetaStore struct {
@@ -53,6 +55,9 @@ func (m *taskMetaStore) init() {
 	}
 	if m.d.ErrAt == nil {
 		m.d.ErrAt = map[string]int64{}
+	}
+	if m.d.Parked == nil {
+		m.d.Parked = map[string]parkedTask{}
 	}
 }
 
@@ -140,6 +145,7 @@ func (a *App) markRemoved(gid string) {
 	m := a.metaStore()
 	m.mu.Lock()
 	m.d.Removed[gid] = time.Now().Unix()
+	delete(m.d.Parked, gid)
 	delete(m.d.Errors, gid)
 	delete(m.d.ErrAt, gid)
 	m.dirty = true

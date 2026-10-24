@@ -6,6 +6,7 @@
 //	hdl status <id> [--json]
 //	hdl list   [--json]
 //	hdl remove <id> [--delete-files] [--json]   hdl pause <id>   hdl resume <id>
+//	hdl version [--json]
 //	hdl help   [--json]
 //
 // 退出码：0 成功；1 任务失败/被移除；2 用法错误；3 无法连接或启动程序；4 等待超时；5 添加被拒绝。
@@ -43,7 +44,7 @@ const (
 // IsCommand 判断 os.Args[1] 是否为 CLI 子命令（否则按普通启动/打开链接处理）。
 func IsCommand(s string) bool {
 	switch s {
-	case "get", "add", "wait", "status", "list", "remove", "pause", "resume", "help", "--help", "-h":
+	case "get", "add", "wait", "status", "list", "remove", "pause", "resume", "version", "--version", "help", "--help", "-h":
 		return true
 	}
 	return false
@@ -100,6 +101,8 @@ const usage = `HornetDownloader command line (agent / script friendly)
   remove <id> [--delete-files] [--json]
   pause  <id> [--json]
   resume <id> [--json]
+  version [--json]
+         hdl version, running app version (does not start it), Go toolchain, commit
   help   [--json]
 
 add/get are idempotent: the same URL into the same dir returns the existing task
@@ -135,6 +138,9 @@ func Main(args []string, opt Options) int {
 		return ExitOK
 	}
 	cmd := args[0]
+	if cmd == "--version" {
+		cmd = "version"
+	}
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(opt.Stderr)
 	dir := fs.String("dir", "", "download directory (absolute; relative paths are resolved against the current directory)")
@@ -158,7 +164,7 @@ func Main(args []string, opt Options) int {
 		c.dataDir = DefaultDataDir()
 	}
 	need := 1
-	if cmd == "list" {
+	if cmd == "list" || cmd == "version" {
 		need = 0
 	}
 	if len(pos) != need {
@@ -166,6 +172,8 @@ func Main(args []string, opt Options) int {
 		return ExitUsage
 	}
 	switch cmd {
+	case "version":
+		return c.runVersion(*asJSON)
 	case "get", "add":
 		if err := c.connect(true); err != nil {
 			return c.fail(*asJSON, ExitUnavailable, err)
@@ -572,7 +580,9 @@ func helpJSON() map[string]any {
 			{"name": "remove", "args": "<id>", "flags": []string{"--delete-files", "--json"}, "desc": "remove a task"},
 			{"name": "pause", "args": "<id>", "flags": []string{"--json"}, "desc": "pause a task"},
 			{"name": "resume", "args": "<id>", "flags": []string{"--json"}, "desc": "resume a task"},
+			{"name": "version", "args": "", "flags": []string{"--json"}, "desc": "hdl version, running app version (never starts the app), Go toolchain, git commit; always exits 0"},
 		},
+		"version":     Version,
 		"commonFlags": []string{"--data-dir", "--port", "--no-start"},
 		"engines":     []string{"auto", "aria2", "bt", "ytdlp"},
 		"exitCodes": map[string]string{
