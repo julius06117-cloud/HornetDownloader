@@ -270,6 +270,30 @@ func (a *App) dropFiles(gid string) {
 	a.res.filesMu.Unlock()
 }
 
+// readyFileList：已读好的文件列表；没有缓存时现读（最多等 filesFetchWait）。
+func (a *App) readyFileList(gid string) (*fileList, error) {
+	a.res.filesMu.Lock()
+	fl := a.res.files[gid]
+	a.res.filesMu.Unlock()
+	if fl != nil {
+		select {
+		case <-fl.done:
+			if fl.err == nil {
+				return fl, nil
+			}
+		default:
+		}
+	}
+	fl, err := a.fileListFor(gid, fl != nil && fl.err != nil)
+	if err != nil {
+		return nil, err
+	}
+	if fl == nil {
+		return nil, fmt.Errorf("文件列表尚未读取完成，请稍后再试")
+	}
+	return fl, nil
+}
+
 // fileListFor 返回缓存的文件列表；正在读取时最多等 filesFetchWait，然后返回 nil（pending）。
 func (a *App) fileListFor(gid string, refresh bool) (*fileList, error) {
 	rs := a.res
@@ -483,19 +507,9 @@ func (a *App) handleStartBT(w http.ResponseWriter, r *http.Request) {
 	selectFile := ""
 	count := -1
 	if !req.Skip {
-		a.res.filesMu.Lock()
-		fl := a.res.files[req.GID]
-		a.res.filesMu.Unlock()
-		ready := false
-		if fl != nil {
-			select {
-			case <-fl.done:
-				ready = fl.err == nil
-			default:
-			}
-		}
-		if !ready {
-			writeErr(w, fmt.Errorf("文件列表尚未读取完成，可点「跳过选择，全部下载」"))
+		fl, ferr := a.readyFileList(req.GID)
+		if ferr != nil {
+			writeErr(w, fmt.Errorf("%v，可点「跳过选择，全部下载」", ferr))
 			return
 		}
 		ex := make(map[int]bool, len(req.Except))
@@ -610,16 +624,22 @@ func (a *App) notePing(r *http.Request) {
 	a.pingMu.Unlock()
 	rs := a.res
 	rs.uiMu.Lock()
+	wasHidden := rs.uiHidden
 	if rs.uiStalled {
 		log.Printf("[watchdog] 界面心跳恢复，中断约 %.1f 秒", now.Sub(rs.uiLastPing).Seconds())
 		rs.uiStalled = false
 	}
 	rs.uiLastPing, rs.uiHidden = now, hb.Hidden
 	rs.uiMu.Unlock()
-	if hb.LagMs >= 2000 {
+	// 窗口隐藏（最小化到托盘）时 WebView2 会把定时器节流到约每分钟一次，
+	// 这时的「卡顿」是节流造成的，不是真的卡住（v1.5.2 每分钟记两条误报）。
+	if hb.LagMs >= 2000 && !hb.Hidden && !wasHidden {
 		log.Printf("[watchdog] 界面主线程卡顿约 %d ms（由界面自报）", hb.LagMs)
 	}
 }
+
+// 隐藏窗口的定时器被节流到约 60 秒一次，超过这个时间才算异常。
+const uiHiddenHeartbeatStale = 150 * time.Second
 
 // uiWatchdog：界面超过 uiHeartbeatStale 没有心跳就写日志（每次中断只记一次）。
 func (a *App) uiWatchdog() {
@@ -633,7 +653,11 @@ func (a *App) uiWatchdog() {
 			rs := a.res
 			rs.uiMu.Lock()
 			last, hidden, flagged := rs.uiLastPing, rs.uiHidden, rs.uiStalled
-			if !last.IsZero() && !flagged && time.Since(last) > uiHeartbeatStale {
+			stale := uiHeartbeatStale
+			if hidden {
+				stale = uiHiddenHeartbeatStale
+			}
+			if !last.IsZero() && !flagged && time.Since(last) > stale {
 				rs.uiStalled = true
 				rs.uiMu.Unlock()
 				ok, stalled, _ := a.aria.Health()
@@ -661,8 +685,12 @@ func (a *App) pauseOne(gid string) error {
 	default:
 		if _, err := a.aria.CallRawTimeout("aria2.forcePause", []any{gid}, 30*time.Second); err != nil {
 			_, err2 := a.aria.CallRawTimeout("aria2.pause", []any{gid}, 30*time.Second)
+			if err2 == nil {
+				a.saveAriaSessionSoon()
+			}
 			return err2
 		}
+		a.saveAriaSessionSoon()
 		return nil
 	}
 }
@@ -681,8 +709,23 @@ func (a *App) unpauseOne(gid string) error {
 		return a.yt.Unpause(gid)
 	default:
 		_, err := a.aria.CallRawTimeout("aria2.unpause", []any{gid}, startBTTimeout)
+		if err == nil {
+			a.saveAriaSessionSoon()
+		}
 		return err
 	}
+}
+
+// saveAriaSessionSoon：暂停/继续后尽快写会话文件。aria2 每 15 秒才自动保存一次，
+// 以前「暂停→继续」后若在 15 秒内被强制结束，重启后任务会停在「已暂停」。
+func (a *App) saveAriaSessionSoon() {
+	if a.aria == nil {
+		return
+	}
+	go func() {
+		time.Sleep(1500 * time.Millisecond) // 等 forcePause / unpause 生效
+		_ = a.aria.Call("aria2.saveSession", nil, nil)
+	}()
 }
 
 func (a *App) deleteRouted(gid string, deleteFiles bool) error {

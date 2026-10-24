@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // 多引擎协调：aria2（HTTP/备用 BT）+ BitTorrent(anacrolix) + yt-dlp。
@@ -250,25 +249,6 @@ func (a *App) addOneTorrent(eng, b64, name, dir string, selectBT bool) (string, 
 		return a.addAria2Torrent(b64, dir, selectBT)
 	}
 	return "", fmt.Errorf("%s 引擎不能处理种子文件", engineLabel(eng))
-}
-
-// noteCreated 记录任务创建时间（任务详情「概览」显示）。
-func (a *App) noteCreated(gid string) {
-	if gid == "" {
-		return
-	}
-	a.createdMu.Lock()
-	if a.created == nil {
-		a.created = map[string]time.Time{}
-	}
-	a.created[gid] = time.Now()
-	a.createdMu.Unlock()
-}
-
-func (a *App) createdAt(gid string) time.Time {
-	a.createdMu.Lock()
-	defer a.createdMu.Unlock()
-	return a.created[gid]
 }
 
 func (a *App) addAria2URI(uri, dir string, selectBT bool) (string, error) {

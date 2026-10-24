@@ -27,6 +27,8 @@ type Aria2 struct {
 	port   int
 	secret string
 	done   chan struct{}
+	// exitErr：aria2c 进程退出时的结果（nil = 退出码 0），done 关闭后可读。
+	exitErr error
 	// 两个独立连接池：慢调用（大种子 getFiles / addTorrent / unpause）不占用
 	// 轮询和暂停等快调用的连接，避免在 Go 侧排队。aria2 本身单线程，
 	// 真正的卡顿由 health 记录、由后台缓存吸收，界面永不直接等待 aria2。
@@ -98,7 +100,11 @@ func StartAria2(exe, dataDir string, args []string) (*Aria2, error) {
 		return nil, err
 	}
 	attachChild(a.cmd)
-	go func() { _ = a.cmd.Wait(); close(a.done) }()
+	go func() {
+		err := a.cmd.Wait()
+		a.exitErr = err
+		close(a.done)
+	}()
 
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -268,4 +274,7 @@ func (p *prefixLogger) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func multiWriter(f *os.File) io.Writer { return io.MultiWriter(f, os.Stderr) }
+// multiWriter：app.log（超过 max 字节后不再写入）+ stderr（控制台运行时可见）。
+func multiWriter(f *os.File, max int64) io.Writer {
+	return io.MultiWriter(&capWriter{f: f, max: max}, os.Stderr)
+}

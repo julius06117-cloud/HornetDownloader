@@ -223,8 +223,9 @@ func (a *App) handleConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{
 			"config": c, "dataDir": a.dataDir, "canPickDir": canPickFolder,
 			"trackerCount": strings.Count(a.trackers(), ",") + 1,
-			"engines": engines,
-			"btReady": a.bt != nil, "ytdlpReady": a.yt != nil && a.yt.findExe() != "",
+			"engines":      engines,
+			"btReady":      a.bt != nil, "ytdlpReady": a.yt != nil && a.yt.findExe() != "",
+			"defaultUserAgent": defaultUserAgent(), "version": AppVersion,
 		})
 		return
 	}
@@ -258,6 +259,7 @@ func (a *App) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"pause-metadata":             strconv.FormatBool(c.SelectBTFiles),
 		"file-allocation":            c.effectiveFileAllocation(),
 		"bt-tracker":                 a.trackers(),
+		"user-agent":                 c.effectiveUserAgent(),
 	}
 	err := a.saveConfig()
 	a.mu.Unlock()
@@ -318,6 +320,9 @@ func (a *App) deleteOne(gid string, deleteFiles bool) error {
 	if err := a.aria.Call("aria2.tellStatus", []any{gid}, &st); err != nil {
 		return err
 	}
+	// 先记墓碑：aria2 --force-save 会把已删除但结果未清掉的任务写回会话，下次启动「复活」。
+	a.markRemoved(gid)
+	defer a.saveTaskMeta()
 	if st.Status == "active" || st.Status == "waiting" || st.Status == "paused" {
 		if err := a.aria.Call("aria2.forceRemove", []any{gid}, nil); err != nil {
 			return err
@@ -330,7 +335,16 @@ func (a *App) deleteOne(gid string, deleteFiles bool) error {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
-	_ = a.aria.Call("aria2.removeDownloadResult", []any{gid}, nil)
+	for i := 0; i < 20; i++ { // 刚 forceRemove 的任务可能还在「removing」，结果要稍后才能清掉
+		if err := a.aria.Call("aria2.removeDownloadResult", []any{gid}, nil); err == nil {
+			break
+		}
+		var s2 ariaStatus
+		if err := a.aria.Call("aria2.tellStatus", []any{gid, []string{"status"}}, &s2); err != nil {
+			break // 已不存在
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
 	st.GID = gid
 	a.cleanupArtifacts(&st)
 	if st.Following != "" {
@@ -463,7 +477,8 @@ func (a *App) retryOne(gid string) error {
 	if err := a.aria.Call("aria2.tellStatus", []any{gid}, &st); err != nil {
 		return fmt.Errorf("读取任务失败: %v", err)
 	}
-	if st.Status != "error" && st.Status != "removed" {
+	forced := a.clearForcedError(gid)
+	if st.Status != "error" && st.Status != "removed" && !forced {
 		return fmt.Errorf("任务不是失败状态（当前：%s）", st.Status)
 	}
 	dir := st.Dir
@@ -635,56 +650,59 @@ func (a *App) fetchTasks() (any, error) {
 		}
 		log.Printf("aria2 任务列表暂时失败，仍合并其它引擎: %v", err)
 	} else {
-	// 再为缺少名称的 HTTP 任务补一份精简 files（仅首个文件）
-	var parts []json.RawMessage
-	if err := json.Unmarshal(raw, &parts); err != nil {
-		return nil, err
-	}
-	_ = json.Unmarshal(unwrapMulti(parts, 0), &active)
-	_ = json.Unmarshal(unwrapMulti(parts, 1), &waiting)
-	_ = json.Unmarshal(unwrapMulti(parts, 2), &stopped)
-	all := append(append(active, waiting...), stopped...)
-	need := make([]string, 0)
-	for _, t := range all {
-		if t["bittorrent"] != nil {
-			continue
+		// 再为缺少名称的 HTTP 任务补一份精简 files（仅首个文件）
+		var parts []json.RawMessage
+		if err := json.Unmarshal(raw, &parts); err != nil {
+			return nil, err
 		}
-		need = append(need, fmt.Sprint(t["gid"]))
-	}
-	fileMap := map[string]any{}
-	if len(need) > 0 && len(need) <= 40 {
-		var calls []rpcCall
-		for _, g := range need {
-			calls = append(calls, rpcCall{Method: "aria2.getFiles", Params: []any{g}})
+		_ = json.Unmarshal(unwrapMulti(parts, 0), &active)
+		_ = json.Unmarshal(unwrapMulti(parts, 1), &waiting)
+		_ = json.Unmarshal(unwrapMulti(parts, 2), &stopped)
+		active = a.applyAria2Overrides(active)
+		waiting = a.applyAria2Overrides(waiting)
+		stopped = a.applyAria2Overrides(stopped)
+		all := append(append(active, waiting...), stopped...)
+		need := make([]string, 0)
+		for _, t := range all {
+			if t["bittorrent"] != nil {
+				continue
+			}
+			need = append(need, fmt.Sprint(t["gid"]))
 		}
-		if fr, err := a.aria.MulticallTimeout(calls, ariaRPCTimeout); err == nil {
-			var fres []json.RawMessage
-			if json.Unmarshal(fr, &fres) == nil {
-				for i, g := range need {
-					if i >= len(fres) {
-						break
-					}
-					var files []map[string]any
-					b := unwrapMulti(fres, i)
-					if json.Unmarshal(b, &files) == nil && len(files) > 0 {
-						fileMap[g] = []any{slimFile(files[0])}
+		fileMap := map[string]any{}
+		if len(need) > 0 && len(need) <= 40 {
+			var calls []rpcCall
+			for _, g := range need {
+				calls = append(calls, rpcCall{Method: "aria2.getFiles", Params: []any{g}})
+			}
+			if fr, err := a.aria.MulticallTimeout(calls, ariaRPCTimeout); err == nil {
+				var fres []json.RawMessage
+				if json.Unmarshal(fr, &fres) == nil {
+					for i, g := range need {
+						if i >= len(fres) {
+							break
+						}
+						var files []map[string]any
+						b := unwrapMulti(fres, i)
+						if json.Unmarshal(b, &files) == nil && len(files) > 0 {
+							fileMap[g] = []any{slimFile(files[0])}
+						}
 					}
 				}
 			}
 		}
-	}
-	for _, t := range all {
-		g := fmt.Sprint(t["gid"])
-		if f, ok := fileMap[g]; ok {
-			t["files"] = f
+		for _, t := range all {
+			g := fmt.Sprint(t["gid"])
+			if f, ok := fileMap[g]; ok {
+				t["files"] = f
+			}
+			t["engine"] = EngineAria2
+			t["engineLabel"] = engineLabel(EngineAria2)
 		}
-		t["engine"] = EngineAria2
-		t["engineLabel"] = engineLabel(EngineAria2)
-	}
-	_ = json.Unmarshal(unwrapMulti(parts, 3), &stat)
-	if stat == nil {
-		stat = map[string]any{}
-	}
+		_ = json.Unmarshal(unwrapMulti(parts, 3), &stat)
+		if stat == nil {
+			stat = map[string]any{}
+		}
 	} // end aria2 ok
 	if a.bt != nil {
 		for _, t := range a.bt.ListSnapshots() {
@@ -721,7 +739,14 @@ func (a *App) fetchTasks() (any, error) {
 		}
 		extraActive++
 		extraDL += parseInt64(t["downloadSpeed"])
-		extraUL += parseInt64(t["uploadSpeed"])
+	}
+	// 上传：内置 BT 下完后仍可能在做种（状态是「已完成」），也要计入顶栏 ↑。
+	for _, l := range [][]map[string]any{active, waiting, stopped} {
+		for _, t := range l {
+			if fmt.Sprint(t["engine"]) != EngineAria2 {
+				extraUL += parseInt64(t["uploadSpeed"])
+			}
+		}
 	}
 	for _, t := range waiting {
 		if fmt.Sprint(t["engine"]) == EngineAria2 {

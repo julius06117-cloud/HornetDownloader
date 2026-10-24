@@ -10,7 +10,7 @@ import (
 const (
 	EngineAuto  = "auto"
 	EngineAria2 = "aria2"
-	EngineBT    = "bt"    // anacrolix/torrent，界面显示为 BitTorrent
+	EngineBT    = "bt" // anacrolix/torrent，界面显示为 BitTorrent
 	EngineYTDLP = "ytdlp"
 )
 
@@ -56,23 +56,50 @@ func RecommendEngine(raw string) (engine, hint string) {
 	if isVideoSiteURL(raw) {
 		return EngineYTDLP, "视频站点页面推荐 yt-dlp（解析真实媒体地址）"
 	}
+	if u, err := url.Parse(raw); err == nil && isCommonsFilePage(u) {
+		return EngineYTDLP, "Wikimedia Commons 文件页是网页，推荐 yt-dlp 解析真实媒体文件"
+	}
 	if strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://") ||
 		strings.HasPrefix(low, "ftp://") || strings.HasPrefix(low, "sftp://") {
 		// 直链常见后缀：走 aria2 多线程
 		u, err := url.Parse(raw)
 		if err == nil {
-			ext := strings.ToLower(path.Ext(u.Path))
-			switch ext {
-			case ".iso", ".zip", ".7z", ".rar", ".exe", ".msi", ".dmg", ".pkg",
-				".apk", ".deb", ".rpm", ".gz", ".xz", ".bz2", ".tar", ".img",
-				".mp4", ".mkv", ".avi", ".mov", ".flv", ".webm", ".mp3", ".flac",
-				".pdf", ".epub", ".bin", ".wim":
+			if directFileExts[strings.ToLower(path.Ext(u.Path))] {
 				return EngineAria2, "文件直链推荐 aria2（多线程 + 断点续传）"
 			}
 		}
 		return EngineAria2, "HTTP/FTP 链接默认推荐 aria2"
 	}
 	return EngineAria2, "将使用 aria2"
+}
+
+// directFileExts：常见的文件直链后缀。
+var directFileExts = map[string]bool{
+	".iso": true, ".zip": true, ".7z": true, ".rar": true, ".exe": true, ".msi": true, ".dmg": true, ".pkg": true,
+	".apk": true, ".deb": true, ".rpm": true, ".gz": true, ".xz": true, ".bz2": true, ".tar": true, ".img": true,
+	".mp4": true, ".mkv": true, ".avi": true, ".mov": true, ".flv": true, ".webm": true, ".mp3": true, ".flac": true,
+	".pdf": true, ".epub": true, ".bin": true, ".wim": true, ".ogg": true, ".ogv": true, ".oga": true, ".opus": true,
+	".wav": true, ".m4a": true, ".m4v": true, ".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".svg": true,
+	".tif": true, ".tiff": true, ".webp": true, ".zst": true, ".msix": true, ".appx": true, ".jar": true,
+}
+
+// isCommonsFilePage：commons.wikimedia.org/wiki/File:xxx.webm 是 HTML 描述页，不是文件本身
+// （真实文件在 upload.wikimedia.org）。以前走 aria2 会把网页存成 xxx.webm 并显示「已完成」。
+func isCommonsFilePage(u *url.URL) bool {
+	host := strings.ToLower(u.Hostname())
+	if host != "commons.wikimedia.org" && host != "commons.m.wikimedia.org" {
+		return false
+	}
+	p := u.Path
+	if dp, err := url.PathUnescape(p); err == nil {
+		p = dp
+	}
+	if strings.HasPrefix(p, "/wiki/File:") || strings.HasPrefix(p, "/wiki/Image:") {
+		return true
+	}
+	// /w/index.php?title=File:xxx
+	t := u.Query().Get("title")
+	return strings.HasPrefix(p, "/w/index.php") && (strings.HasPrefix(t, "File:") || strings.HasPrefix(t, "Image:"))
 }
 
 func isVideoSiteURL(raw string) bool {

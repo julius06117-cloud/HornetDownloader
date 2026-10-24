@@ -105,6 +105,33 @@ textarea{width:100%;resize:vertical}
 #detBody table{font-size:12px}
 #detBody .kv{display:grid;grid-template-columns:110px 1fr;gap:6px 10px}
 #detBody .kv b{color:var(--sub);font-weight:400}
+/* v1.5.3：小窗口 / 高缩放（如 1280×820 @150% ≈ 853 CSS 像素宽）下不再横向溢出 */
+@media (max-width:1100px){
+  #app{grid-template-columns:150px 1fr}
+  header{gap:6px;padding:0 10px}
+  header button{padding:5px 9px}
+  .logo{margin-right:6px;font-size:15px}
+  .loveq{display:none}
+  main{padding:10px}
+  main table col:nth-child(3){width:70px!important}
+  main table col:nth-child(4){width:112px!important}
+  main table col:nth-child(5){width:80px!important}
+  main table col:nth-child(7){width:100px!important}
+  main table col:nth-child(8){width:150px!important}
+  main table col:nth-child(6),main table th:nth-child(6),main table td:nth-child(6){display:none}
+  td,th{padding-left:7px;padding-right:7px}
+  .row label.k{width:96px}
+}
+@media (max-width:900px){
+  .logo{font-size:0;gap:0}
+  #gspeed{font-size:12px}
+  main table col:nth-child(3),main table th:nth-child(3),main table td:nth-child(3){display:none}
+}
+@media (max-height:700px){
+  .dlg{max-height:94vh}
+  #detBody{max-height:44vh}
+  .flist{max-height:40vh}
+}
 </style>
 </head>
 <body>
@@ -191,6 +218,9 @@ textarea{width:100%;resize:vertical}
     <div class="row"><label class="k">下载限速</label><input type="number" id="sDl" min="0" style="max-width:120px"> KB/s <span class="hint">0 为不限速</span></div>
     <div class="row"><label class="k">上传限速</label><input type="number" id="sUl" min="0" style="max-width:120px"> KB/s <span class="hint">0 为不限速</span></div>
     <div class="row"><label class="k">单任务连接数</label><input type="number" id="sSplit" min="1" max="16" style="max-width:100px"> <span class="hint">HTTP 多线程分段下载，1–16</span></div>
+    <div class="row"><label class="k">User-Agent</label><input type="text" id="sUA" placeholder="留空使用默认"> <span class="hint">HTTP 下载时的浏览器标识</span></div>
+    <div class="row"><label class="k">备用 User-Agent</label><input type="text" id="sUAFb" placeholder="Wget/1.21.4"> <span class="hint">遇到 403/418 时用它自动重试一次</span></div>
+    <div class="row"><label class="k">剪贴板</label><label><input type="checkbox" id="sClip"> 复制下载链接时提示（只提示新复制的链接）</label></div>
     <div class="row"><label class="k">下完后做种</label><input type="number" id="sSeed" min="0" style="max-width:100px"> 分钟 <span class="hint">0 为下完立即停止做种</span></div>
     <div class="row"><label class="k">种子/磁力</label><label><input type="checkbox" id="sPick"> 开始下载前先选择文件</label></div>
     <div class="row"><label class="k">磁盘空间分配</label><select id="sAlloc"><option value="auto">自动（推荐）</option><option value="prealloc">预先分配（Windows 推荐，不卡界面）</option><option value="none">不预先分配</option><option value="trunc">仅设置文件长度</option></select></div>
@@ -438,7 +468,7 @@ function rowCells(t) {
   const [tp, tc] = taskType(t), [st, sc, tip, sub] = statusText(t);
   const barCls = t.status === "complete" ? "done" : t.status === "error" ? "err" : t.status === "active" ? "" : "pause";
   let speed = t.status === "active" ? fmtSize(spd) + "/s" : "";
-  if (t.status === "active" && t.seeder === "true" && t.bittorrent) speed = "↑ " + fmtSize(t.uploadSpeed) + "/s";
+  if ((t.status === "active" || t.status === "complete") && t.seeder === "true" && t.bittorrent) speed = "↑ " + fmtSize(t.uploadSpeed) + "/s";
   const eta = t.status === "active" && spd > 0 && total > done ? fmtEta((total - done) / spd) : "--";
   const ops = buildOps(t);
   const tipFull = tip || st;
@@ -569,6 +599,7 @@ function closeDlg(m) {
 }
 // 每个对话框标题栏都有 ✕；Esc 在捕获阶段处理，任何情况下都能关掉遮罩。
 document.querySelectorAll(".dlg > h3").forEach(h => {
+  if (h.querySelector(".xbtn")) { const b = h.querySelector(".xbtn"); if (!b.onclick) b.onclick = () => closeDlg(h.closest(".mask")); return; } // 已自带 ✕（任务详情）
   const t = document.createElement("span"); t.className = "ttl"; while (h.firstChild) t.appendChild(h.firstChild); h.appendChild(t);
   if (h.id) { t.id = h.id; h.removeAttribute("id"); }
   const x = document.createElement("button"); x.type = "button"; x.className = "xbtn"; x.title = "关闭 (Esc)"; x.textContent = "✕";
@@ -892,6 +923,7 @@ $("#btnSet").onclick = async () => {
   const j = await loadCfg();
   $("#sDir").value = cfg.downloadDir; $("#sConc").value = cfg.maxConcurrent; $("#sDl").value = cfg.maxDownloadKB; $("#sUl").value = cfg.maxUploadKB;
   $("#sSplit").value = cfg.splitPerTask; $("#sSeed").value = cfg.seedMinutes; $("#sPick").checked = cfg.selectBTFiles; $("#sTray").checked = cfg.closeToTray !== false; $("#sAlloc").value = cfg.fileAllocation || "auto"; $("#sEngine").value = cfg.defaultEngine || "auto"; $("#sTrk").value = cfg.extraTrackers || "";
+  $("#sUA").value = cfg.userAgent || ""; $("#sUA").placeholder = "留空使用默认：" + (j.defaultUserAgent || ""); $("#sUAFb").value = cfg.userAgentFallback || ""; $("#sClip").checked = cfg.clipboardWatch !== false;
   $("#sDirPick").style.display = canPick ? "" : "none";
   const engSt = (j.btReady ? "BitTorrent 就绪" : "BitTorrent 未启动") + " · " + (j.ytdlpReady ? "yt-dlp 就绪" : "yt-dlp 首次用时自动下载");
   $("#sInfo").textContent = "已内置 " + j.trackerCount + " 个 Tracker · " + engSt + " · 配置：" + j.dataDir;
@@ -902,7 +934,8 @@ $("#btnSet").onclick = async () => {
 $("#sDirPick").onclick = async () => { const p = await pickDir(); if (p) $("#sDir").value = p; };
 $("#sOk").onclick = async () => {
   const c = {downloadDir: $("#sDir").value.trim(), maxConcurrent: +$("#sConc").value || 3, maxDownloadKB: +$("#sDl").value || 0, maxUploadKB: +$("#sUl").value || 0,
-    splitPerTask: +$("#sSplit").value || 16, seedMinutes: +$("#sSeed").value || 0, selectBTFiles: $("#sPick").checked, closeToTray: $("#sTray").checked, fileAllocation: $("#sAlloc").value, defaultEngine: $("#sEngine").value, extraTrackers: $("#sTrk").value};
+    splitPerTask: +$("#sSplit").value || 16, seedMinutes: +$("#sSeed").value || 0, selectBTFiles: $("#sPick").checked, closeToTray: $("#sTray").checked, fileAllocation: $("#sAlloc").value, defaultEngine: $("#sEngine").value, extraTrackers: $("#sTrk").value,
+    userAgent: $("#sUA").value.trim(), userAgentFallback: $("#sUAFb").value.trim(), clipboardWatch: $("#sClip").checked};
   try { await api("/api/config", c); await loadCfg(); closeDlg($("#mSet")); toast("设置已保存"); } catch (e) { toast(e.message, 5000); }
 };
 $("#sAssocReg").onclick = async () => { try { await api("/api/assoc", {action: "register"}); toast("已注册关联"); refreshAssoc(); } catch (e) { toast(e.message); } };

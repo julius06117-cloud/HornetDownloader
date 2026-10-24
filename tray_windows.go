@@ -12,31 +12,31 @@ import (
 )
 
 const (
-	wmApp            = 0x8000
-	wmTrayIcon       = wmApp + 1
-	wmClose          = 0x0010
-	wmNull           = 0x0000
-	wmLButtonUp      = 0x0202
-	wmLButtonDblClk  = 0x0203
-	wmRButtonUp      = 0x0205
-	wmContextMenu    = 0x007B
-	trayIconUID      = 1
-	nimAdd           = 0x00000000
-	nimDelete        = 0x00000002
-	nifMessage       = 0x00000001
-	nifIcon          = 0x00000002
-	nifTip           = 0x00000004
-	nifShowTip       = 0x00000080
-	tpmRightButton   = 0x0002
-	tpmReturnCmd     = 0x0100
-	idTrayShow       = 1001
-	idTrayExit       = 1002
-	swHide           = 0
-	swRestore        = 9
-	swShow           = 5
-	imageIcon        = 1
-	lrDefaultSize    = 0x00000040
-	lrShared         = 0x00008000
+	wmApp           = 0x8000
+	wmTrayIcon      = wmApp + 1
+	wmClose         = 0x0010
+	wmNull          = 0x0000
+	wmLButtonUp     = 0x0202
+	wmLButtonDblClk = 0x0203
+	wmRButtonUp     = 0x0205
+	wmContextMenu   = 0x007B
+	trayIconUID     = 1
+	nimAdd          = 0x00000000
+	nimDelete       = 0x00000002
+	nifMessage      = 0x00000001
+	nifIcon         = 0x00000002
+	nifTip          = 0x00000004
+	nifShowTip      = 0x00000080
+	tpmRightButton  = 0x0002
+	tpmReturnCmd    = 0x0100
+	idTrayShow      = 1001
+	idTrayExit      = 1002
+	swHide          = 0
+	swRestore       = 9
+	swShow          = 5
+	imageIcon       = 1
+	lrDefaultSize   = 0x00000040
+	lrShared        = 0x00008000
 )
 
 type notifyIconData struct {

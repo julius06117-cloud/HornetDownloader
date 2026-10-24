@@ -49,8 +49,12 @@ func readClipboardText() (string, bool) {
 }
 
 func (a *App) watchClipboard() {
-	log.Println("剪贴板监视已启动")
-	var last string
+	enabled := a.clipboardEnabled()
+	if enabled {
+		log.Println("剪贴板监视已启动")
+	} else {
+		log.Println("剪贴板监视未开启（设置）")
+	}
 	t := time.NewTicker(900 * time.Millisecond)
 	defer t.Stop()
 	for {
@@ -58,12 +62,21 @@ func (a *App) watchClipboard() {
 		case <-a.quit:
 			return
 		case <-t.C:
-			text, ok := readClipboardText()
-			if !ok || text == "" {
-				continue
+			on := a.clipboardEnabled()
+			if !on {
+				if enabled {
+					log.Println("剪贴板监视已关闭（设置）")
+					a.clipSeen.reset()
+				}
+				enabled = false
+				continue // 关闭时完全不读剪贴板
 			}
-			urls := extractDownloadURLs(text)
-			a.enqueueClipboardURLs(urls, &last)
+			if !enabled {
+				log.Println("剪贴板监视已打开（设置）")
+				enabled = true
+			}
+			text, _ := readClipboardText() // 读不到（空/非文本/被占用）按空文本处理，首次也会建立基线
+			a.enqueueClipboardText(text)
 		}
 	}
 }

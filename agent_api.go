@@ -20,7 +20,7 @@ import (
 )
 
 // AppVersion 是发布版本号（与 README / 发布 zip 一致）。
-const AppVersion = "1.5.2"
+const AppVersion = "1.5.3"
 
 const (
 	apiTokenFile = "api-token"
@@ -89,6 +89,9 @@ func toAgentTask(t map[string]any) agentTask {
 		TotalBytes: parseInt64(t["totalLength"]), DoneBytes: parseInt64(t["completedLength"]),
 		SpeedBps: parseInt64(t["downloadSpeed"]), Error: s("errorMessage"), Files: []string{},
 		AddedBy: s("addedBy"), Peers: parseInt64(t["connections"]), Seeders: parseInt64(t["numSeeders"]),
+	}
+	if at.Status != "active" {
+		at.SpeedBps = 0 // aria2 暂停后的一两秒里仍报告上次的速度
 	}
 	if at.Engine == "" {
 		at.Engine = EngineAria2
@@ -171,6 +174,7 @@ func (a *App) cachedTasks() []map[string]any {
 }
 
 func (a *App) agentTaskByID(id string) (agentTask, bool) {
+	id = a.resolveAlias(id) // 403 换 UA 重试后任务 ID 会变
 	for _, t := range a.cachedTasks() {
 		if fmt.Sprint(t["gid"]) != id {
 			continue
@@ -339,6 +343,7 @@ func (a *App) handleV1Control(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]any{"error": "id required"})
 		return
 	}
+	req.ID = a.resolveAlias(strings.TrimSpace(req.ID))
 	if _, ok := a.agentTaskByID(req.ID); !ok {
 		writeJSON(w, 404, map[string]any{"error": "task not found", "id": req.ID})
 		return
@@ -392,9 +397,16 @@ func (a *App) markAgentTask(gid string) {
 		}
 		delete(a.agentGIDs, oldest)
 	}
+	a.saveTaskSourceLocked()
+}
+
+func (a *App) saveTaskSourceLocked() {
 	if a.dataDir != "" {
 		b, _ := json.Marshal(a.agentGIDs)
-		_ = os.WriteFile(filepath.Join(a.dataDir, taskSourceFile), b, 0600)
+		tmp := filepath.Join(a.dataDir, taskSourceFile+".tmp")
+		if os.WriteFile(tmp, b, 0600) == nil {
+			_ = os.Rename(tmp, filepath.Join(a.dataDir, taskSourceFile))
+		}
 	}
 }
 

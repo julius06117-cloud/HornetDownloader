@@ -4,7 +4,7 @@
   Assets use stable names so /releases/latest/download/<name> always works:
   HornetDownloader-win64.zip, HornetDownloader.exe, hdl.exe, install.ps1, SHA256SUMS.txt, release.json
 .EXAMPLE
-  .\scripts\release.ps1 -Tag v1.5.2 -NotesFile docs\release-notes\v1.5.2.md
+  .\scripts\release.ps1 -Tag v1.5.3 -NotesFile docs\release-notes\v1.5.3.md
 #>
 param(
   [Parameter(Mandatory = $true)][string]$Tag,
@@ -60,4 +60,8 @@ $json = $manifest | ConvertTo-Json -Depth 6
 [System.IO.File]::WriteAllText((Join-Path (Get-Location) "dist\release.json"), $json + "`n")
 & $Gh release upload $Tag "dist\release.json" --repo $Repo --clobber
 if ($LASTEXITCODE -ne 0) { throw "upload release.json failed" }
-& $Gh release view $Tag --repo $Repo --json url,assets --jq '.url, (.assets[] | .name + "  " + (.size|tostring))'
+# 不用 --jq：Windows PowerShell 5.1 传给原生程序时会吞掉参数里的双引号，jq 表达式解析失败
+$view = & $Gh release view $Tag --repo $Repo --json url,assets
+$rel = ($view -join "`n") | ConvertFrom-Json
+Write-Host $rel.url
+foreach ($a in $rel.assets) { Write-Host ("{0}  {1}" -f $a.name, $a.size) }

@@ -23,19 +23,11 @@ func (a *App) handleReselect(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fmt.Errorf("参数错误"))
 		return
 	}
-	a.res.filesMu.Lock()
-	fl := a.res.files[req.GID]
-	a.res.filesMu.Unlock()
-	ready := false
-	if fl != nil {
-		select {
-		case <-fl.done:
-			ready = fl.err == nil
-		default:
-		}
-	}
-	if !ready && !req.Skip {
-		writeErr(w, fmt.Errorf("文件列表尚未读取完成"))
+	// v1.5.3：以前只看界面「选择文件」对话框留下的缓存；从任务详情（尤其是已完成的任务）
+	// 直接重选时缓存不存在，总是报「文件列表尚未读取完成」。现在按需读取（BT 立即返回）。
+	fl, ferr := a.readyFileList(req.GID)
+	if ferr != nil && !req.Skip {
+		writeErr(w, ferr)
 		return
 	}
 	var sel []int
@@ -405,8 +397,8 @@ func (a *App) detailsPeers(gid, eng string) ([]map[string]any, error) {
 		var servers []struct {
 			Index   string `json:"index"`
 			Servers []struct {
-				URI          string `json:"uri"`
-				CurrentURI   string `json:"currentUri"`
+				URI           string `json:"uri"`
+				CurrentURI    string `json:"currentUri"`
 				DownloadSpeed string `json:"downloadSpeed"`
 			} `json:"servers"`
 		}

@@ -32,19 +32,19 @@ type YTDLPEngine struct {
 }
 
 type ytTask struct {
-	gid       string
-	url       string
-	dir       string
-	status    string
-	errMsg    string
-	title     string
-	total     int64
-	done      int64
-	speed     int64
-	cmd       *exec.Cmd
-	cancel    context.CancelFunc
-	addedAt   time.Time
-	outPath   string
+	gid     string
+	url     string
+	dir     string
+	status  string
+	errMsg  string
+	title   string
+	total   int64
+	done    int64
+	speed   int64
+	cmd     *exec.Cmd
+	cancel  context.CancelFunc
+	addedAt time.Time
+	outPath string
 }
 
 func StartYTDLPEngine(appData string, cfgFn func() Config) *YTDLPEngine {
@@ -421,15 +421,15 @@ func (e *YTDLPEngine) ListSnapshots() []map[string]any {
 		m := map[string]any{
 			"gid": t.gid, "status": t.status,
 			"totalLength": fmt.Sprintf("%d", t.total), "completedLength": fmt.Sprintf("%d", t.done),
-			"uploadLength": "0",
+			"uploadLength":  "0",
 			"downloadSpeed": fmt.Sprintf("%d", t.speed), "uploadSpeed": "0",
 			"connections": "1", "numSeeders": "0",
 			"dir": t.dir, "infoHash": "",
 			"bittorrent": nil,
 			"files": []map[string]any{{
-				"path": path,
+				"path":   path,
 				"length": fmt.Sprintf("%d", t.total),
-				"uris": []map[string]any{{"uri": t.url}},
+				"uris":   []map[string]any{{"uri": t.url}},
 			}},
 			"engine": EngineYTDLP, "engineLabel": e.Label(),
 			"errorMessage": t.errMsg, "errorCode": "",

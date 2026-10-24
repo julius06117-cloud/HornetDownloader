@@ -52,7 +52,7 @@ func TestAria2HTTPLocalDownload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer a.Shutdown(3*time.Second)
+	defer a.Shutdown(3 * time.Second)
 
 	var gid string
 	if err := a.Call("aria2.addUri", []any{[]string{url}, map[string]string{

@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"hornetdl/internal/agentcli"
+	// 必须在 anacrolix/torrent/storage 的 init() 之前生效（见包注释）。
+	_ "hornetdl/internal/earlyenv"
 )
 
 const appName = "HornetDownloader"
@@ -51,6 +53,25 @@ type Config struct {
 	// BTPort: BitTorrent 监听端口，首次运行从 6881–6999 选一个后固定下来，
 	// 这样防火墙 / 路由器端口映射规则不会因每次换端口而失效。0 = 尚未选定。
 	BTPort int `json:"btPort,omitempty"`
+	// UserAgent：HTTP/FTP 下载使用的 User-Agent，空 = 默认 HornetDownloader/<版本>。
+	UserAgent string `json:"userAgent"`
+	// UserAgentFallback：服务器返回 403/418 时自动重试一次所用的 User-Agent，空 = 不重试。
+	UserAgentFallback string `json:"userAgentFallback"`
+	// ClipboardWatch：监视剪贴板里新出现的下载链接并询问是否添加。
+	ClipboardWatch bool `json:"clipboardWatch"`
+}
+
+// defaultUserAgent 如实标明客户端（不伪装浏览器）。
+func defaultUserAgent() string { return appName + "/" + AppVersion }
+
+// defaultUserAgentFallback：403/418 时的备用 UA。各大国内镜像对 Wget 均放行（v1.5.3 实测）。
+const defaultUserAgentFallback = "Wget/1.21.4"
+
+func (c Config) effectiveUserAgent() string {
+	if ua := strings.TrimSpace(c.UserAgent); ua != "" {
+		return ua
+	}
+	return defaultUserAgent()
 }
 
 func (c Config) effectiveFileAllocation() string {
@@ -75,6 +96,9 @@ func defaultConfig() Config {
 		CloseToTray:    true,
 		FileAllocation: "auto",
 		DefaultEngine:  EngineAuto,
+		ClipboardWatch: true,
+
+		UserAgentFallback: defaultUserAgentFallback,
 	}
 }
 
@@ -104,8 +128,10 @@ type App struct {
 
 	srcMu     sync.Mutex
 	agentGIDs map[string]int64 // 由 /api/v1/add 添加的任务（task-source.json）
-	createdMu sync.Mutex
-	created   map[string]time.Time
+	metaOnce  sync.Once
+	meta      *taskMetaStore
+	guardKick chan struct{}
+	clipSeen  clipSeenSet
 
 	// 测试钩子：非 nil 时替代真实引擎添加
 	addURLHook     func(eng, uri, dir string, selectBT bool) (string, error)
@@ -136,6 +162,12 @@ func (a *App) loadConfig() {
 		if json.Unmarshal(b, &raw) == nil {
 			if _, ok := raw["closeToTray"]; !ok {
 				a.cfg.CloseToTray = true
+			}
+			if _, ok := raw["clipboardWatch"]; !ok {
+				a.cfg.ClipboardWatch = true
+			}
+			if _, ok := raw["userAgentFallback"]; !ok {
+				a.cfg.UserAgentFallback = defaultUserAgentFallback
 			}
 		}
 	}
@@ -168,6 +200,8 @@ func (a *App) normalize(c *Config) {
 	if c.BTPort < 1024 || c.BTPort > 65535 {
 		c.BTPort = 0
 	}
+	c.UserAgent = sanitizeUA(c.UserAgent)
+	c.UserAgentFallback = sanitizeUA(c.UserAgentFallback)
 	switch c.FileAllocation {
 	case "auto", "prealloc", "none", "trunc":
 	default:
@@ -179,6 +213,21 @@ func (a *App) normalize(c *Config) {
 	default:
 		c.DefaultEngine = EngineAuto
 	}
+}
+
+// sanitizeUA：去掉换行/控制字符（会被拼进 aria2 命令行与 HTTP 头），限制长度。
+func sanitizeUA(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+	s = strings.TrimSpace(s)
+	if len(s) > 300 {
+		s = s[:300]
+	}
+	return s
 }
 
 func (a *App) saveConfig() error {
@@ -225,6 +274,7 @@ func main() {
 	fwPublic := flag.Bool("firewall-public", false, "防火墙规则同时允许公用网络")
 	fwAria2 := flag.String("firewall-aria2", "", "同时放行的 aria2c.exe 路径")
 	fwDry := flag.Bool("firewall-dry-run", false, "只打印「添加防火墙规则」会执行的 netsh 命令（不提权、不修改）")
+	pprofFlag := flag.String("pprof", "", "诊断：在本机回环地址开启 pprof 与 /debug/mem，例如 127.0.0.1:6061（也可用环境变量 HORNET_PPROF）")
 	flag.Parse()
 	if *fwDry {
 		exe, _ := os.Executable()
@@ -278,12 +328,16 @@ func main() {
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		fatal("无法创建数据目录: " + err.Error())
 	}
-	logf, err := os.OpenFile(filepath.Join(dataDir, "app.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	logf, err := openAppLog(dataDir)
 	if err == nil {
-		log.SetOutput(multiWriter(logf))
+		log.SetOutput(multiWriter(logf, 64<<20))
 	}
+	log.Printf("%s %s 启动 pid=%d %s", appName, AppVersion, os.Getpid(), runtimeInfo())
+	setupCrashOutput(dataDir)
+	defer closeCrashOutput()
+	applyMemoryLimit()
 
-	app := &App{dataDir: dataDir, cfgPath: filepath.Join(dataDir, "config.json"), quit: make(chan struct{})}
+	app := &App{dataDir: dataDir, cfgPath: filepath.Join(dataDir, "config.json"), quit: make(chan struct{}), guardKick: make(chan struct{}, 1)}
 	app.loadConfig()
 	app.art = newArtifacts(dataDir)
 	app.res = newResilience()
@@ -347,6 +401,7 @@ func main() {
 		}
 		app.mu.Unlock()
 	}
+	app.loadTaskMeta()
 	app.yt = StartYTDLPEngine(dataDir, func() Config {
 		app.mu.Lock()
 		defer app.mu.Unlock()
@@ -361,13 +416,15 @@ func main() {
 			app.Quit()
 		}
 	}()
-	go app.janitor()
-	go app.taskPoller()
-	go app.actionWorker()
-	go app.uiWatchdog()
-	go app.watchClipboard()
+	goLoop("janitor", app.quit, app.janitor)
+	goLoop("taskPoller", app.quit, app.taskPoller)
+	goLoop("actionWorker", app.quit, app.actionWorker)
+	goLoop("uiWatchdog", app.quit, app.uiWatchdog)
+	goLoop("clipboard", app.quit, app.watchClipboard)
+	goLoop("memHeartbeat", app.quit, app.memHeartbeat)
+	app.startPprof(pprofAddr(*pprofFlag))
 	// 首次运行自动尝试注册关联（失败不影响使用）
-	go tryRegisterAssociationsOnce(dataDir)
+	goSafe("assoc", func() { tryRegisterAssociationsOnce(dataDir) })
 	log.Println("界面地址:", app.uiURL)
 	if *noWindow {
 		fmt.Println("UI:", app.uiURL)
@@ -378,7 +435,13 @@ func main() {
 	go func() { <-sig; app.Quit() }()
 	go func() { // aria2c 意外退出时，程序也退出
 		<-app.aria.done
-		log.Println("aria2c 已退出")
+		select {
+		case <-app.quit:
+			return // 正常退出流程中由 shutdown 结束 aria2c
+		default:
+		}
+		log.Printf("aria2c 意外退出（%v），程序随之退出。aria2.log 末尾可能有原因", app.aria.exitErr)
+		writeCrashNote(fmt.Sprintf("aria2c exited unexpectedly: %v", app.aria.exitErr))
 		app.Quit()
 	}()
 
@@ -426,7 +489,9 @@ func (a *App) ariaArgs() []string {
 		"--lowest-speed-limit=1K", // 丢弃假活连接，促使换源/重试
 		fmt.Sprintf("--max-overall-download-limit=%dK", c.MaxDownloadKB),
 		fmt.Sprintf("--max-overall-upload-limit=%dK", c.MaxUploadKB),
-		"--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+		// v1.5.3：如实标明客户端。旧版伪装成 Chrome/130，被清华 TUNA、北外 BFSU 等镜像判为
+		// 过期浏览器/爬虫直接 403。遇到 403/418 时会用 userAgentFallback 自动重试一次。
+		"--user-agent=" + c.effectiveUserAgent(),
 		"--enable-http-pipelining=true",
 		"--always-resume=true",
 		"--max-resume-failure-tries=0",
@@ -473,6 +538,7 @@ func (a *App) shutdown(srv *http.Server) {
 		a.yt.Close()
 	}
 	a.aria.Shutdown(8 * time.Second)
+	a.saveTaskMeta()
 	log.Println("已退出")
 }
 

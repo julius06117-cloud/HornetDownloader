@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,8 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -56,8 +59,25 @@ type btTask struct {
 	upSpeed   int64
 	lastUp    int64
 	metaOK    bool
-	doneOnce  bool
 	lastHint  time.Time
+	// v1.5.3：下载速度按网络收到的有效数据计算（BytesReadUsefulData），
+	// 不再用「已完成字节」的差值——重启后校验已有数据会让后者瞬间暴涨，显示假速度。
+	lastRead int64
+	checking bool // 正在校验已有数据（重启后 .part 文件需要重新哈希）
+	// 完成与做种
+	completedAt time.Time
+	seeding     bool // 下完后仍在做种（SeedMinutes > 0）
+	seedUntil   time.Time
+	uploaded    int64
+}
+
+// btGIDFor：BT 任务 ID 由 infohash 派生，重启后不变（以前每次启动随机生成，agent 记下的 ID 会失效）。
+func btGIDFor(ih string) string {
+	ih = strings.ToLower(ih)
+	if len(ih) > 16 {
+		ih = ih[:16]
+	}
+	return "bt-" + ih
 }
 
 // btPortFree 探测端口的 TCP 与 UDP（DHT/uTP 同端口）是否都能绑定。
@@ -112,6 +132,9 @@ func StartBTEngine(appData string, cfgFn func() Config, trackers func() []string
 	cfg := torrent.NewDefaultClientConfig()
 	cfg.DataDir = dir
 	cfg.ListenPort = port
+	// anacrolix 日志只保留 Warn 以上，写进 app.log；过滤掉经典文件 IO 下哈希「正确」时
+	// 也会附带的 short write 噪声（上游 limitWriter 行为，数据无误）
+	cfg.Slogger = slog.New(btLogFilter{slog.NewTextHandler(log.Writer(), &slog.HandlerOptions{Level: slog.LevelWarn})})
 	// 默认开启 UPnP/NAT-PMP，改善家宽 NAT 入站（国内运营商尤其依赖）
 	cfg.NoDefaultPortForwarding = false
 	cfg.Seed = true // 下载中仍 reciprocal 上传；下完是否久做种由任务侧控制
@@ -195,7 +218,14 @@ func (e *btDuplicateError) Error() string {
 // AddTorrentURL：下载 http(s) 上的 .torrent 文件后交给 BitTorrent 引擎。
 func (e *BTEngine) AddTorrentURL(u, dir string, selectFiles bool) (string, error) {
 	cl := &http.Client{Timeout: 30 * time.Second}
-	resp, err := cl.Get(u)
+	req, err := http.NewRequest(http.MethodGet, u, nil)
+	if err != nil {
+		return "", fmt.Errorf("下载种子文件失败: %v", err)
+	}
+	if e.cfgFn != nil {
+		req.Header.Set("User-Agent", e.cfgFn().effectiveUserAgent())
+	}
+	resp, err := cl.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("下载种子文件失败: %v", err)
 	}
@@ -211,7 +241,7 @@ func (e *BTEngine) AddTorrentURL(u, dir string, selectFiles bool) (string, error
 	if !strings.HasSuffix(strings.ToLower(name), ".torrent") {
 		name = ""
 	}
-	return e.addTorrentBytes(raw, name, dir, selectFiles, nil)
+	return e.addTorrentBytes(raw, name, dir, selectFiles, nil, nil)
 }
 
 func (e *BTEngine) checkDup(ih string) error {
@@ -223,7 +253,45 @@ func (e *BTEngine) checkDup(ih string) error {
 	return nil
 }
 
-func (e *BTEngine) newGID() string { return "bt-" + randHex(8) }
+// pickGIDLocked：优先沿用会话里保存的 ID，否则由 infohash 派生；极少数冲突时加后缀。
+func (e *BTEngine) pickGIDLocked(ih, prefer string) string {
+	if prefer != "" && strings.HasPrefix(prefer, "bt-") {
+		if _, taken := e.tasks[prefer]; !taken {
+			return prefer
+		}
+	}
+	gid := btGIDFor(ih)
+	for i := 2; ; i++ {
+		if _, taken := e.tasks[gid]; !taken {
+			return gid
+		}
+		gid = fmt.Sprintf("%s-%d", btGIDFor(ih), i)
+	}
+}
+
+// metaPath：元数据缓存（magnet 拿到元数据后保存，重启时不必再从 DHT/Tracker 重新获取）。
+func (e *BTEngine) metaPath(ih string) string {
+	return filepath.Join(e.dataDir, "meta", strings.ToLower(ih)+".torrent")
+}
+
+func (e *BTEngine) saveMetainfo(t *torrent.Torrent) {
+	ih := strings.ToLower(t.InfoHash().HexString())
+	p := e.metaPath(ih)
+	if _, err := os.Stat(p); err == nil {
+		return
+	}
+	mi := t.Metainfo()
+	var buf bytes.Buffer
+	if err := mi.Write(&buf); err != nil {
+		log.Printf("[bt] 保存元数据失败 %s: %v", ih, err)
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(p), 0700)
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, buf.Bytes(), 0600); err == nil {
+		_ = os.Rename(tmp, p)
+	}
+}
 
 func (e *BTEngine) trackerList() [][]string {
 	var list []string
@@ -261,11 +329,18 @@ func (e *BTEngine) storageFor(dir string) storage.ClientImpl {
 	})
 }
 
-func (e *BTEngine) AddMagnet(uri, dir string, selectFiles bool) (string, error) {
-	return e.addMagnet(uri, dir, selectFiles, nil)
+// btRestore：从会话恢复时沿用的信息（新添加的任务为 nil）。
+type btRestore struct {
+	GID         string
+	AddedAt     time.Time
+	CompletedAt time.Time
 }
 
-func (e *BTEngine) addMagnet(uri, dir string, selectFiles bool, selected map[int]bool) (string, error) {
+func (e *BTEngine) AddMagnet(uri, dir string, selectFiles bool) (string, error) {
+	return e.addMagnet(uri, dir, selectFiles, nil, nil)
+}
+
+func (e *BTEngine) addMagnet(uri, dir string, selectFiles bool, selected map[int]bool, rs *btRestore) (string, error) {
 	uri = strings.TrimSpace(uri)
 	if !strings.HasPrefix(strings.ToLower(uri), "magnet:") {
 		return "", fmt.Errorf("不是磁力链接")
@@ -280,6 +355,17 @@ func (e *BTEngine) addMagnet(uri, dir string, selectFiles bool, selected map[int
 	if err := e.checkDup(spec.InfoHash.HexString()); err != nil {
 		return "", err
 	}
+	// 已缓存元数据：直接用，重启后无需等待 DHT/Tracker
+	if raw, rerr := os.ReadFile(e.metaPath(spec.InfoHash.HexString())); rerr == nil {
+		if meta, merr := metainfo.Load(bytes.NewReader(raw)); merr == nil {
+			full := torrent.TorrentSpecFromMetaInfo(meta)
+			if strings.EqualFold(full.InfoHash.HexString(), spec.InfoHash.HexString()) {
+				full.Trackers = append(full.Trackers, spec.Trackers...)
+				full.DisplayName = spec.DisplayName
+				spec = full
+			}
+		}
+	}
 	spec.Storage = e.storageFor(dir)
 	if tr := e.trackerList(); tr != nil {
 		spec.Trackers = append(spec.Trackers, tr...)
@@ -288,7 +374,7 @@ func (e *BTEngine) addMagnet(uri, dir string, selectFiles bool, selected map[int
 	if err != nil {
 		return "", err
 	}
-	return e.register(t, dir, uri, selectFiles, selected)
+	return e.register(t, dir, uri, selectFiles, selected, rs)
 }
 
 func (e *BTEngine) AddTorrentB64(b64, name, dir string, selectFiles bool) (string, error) {
@@ -296,10 +382,10 @@ func (e *BTEngine) AddTorrentB64(b64, name, dir string, selectFiles bool) (strin
 	if err != nil {
 		return "", fmt.Errorf("种子解码失败: %v", err)
 	}
-	return e.addTorrentBytes(raw, name, dir, selectFiles, nil)
+	return e.addTorrentBytes(raw, name, dir, selectFiles, nil, nil)
 }
 
-func (e *BTEngine) addTorrentBytes(raw []byte, name, dir string, selectFiles bool, selected map[int]bool) (string, error) {
+func (e *BTEngine) addTorrentBytes(raw []byte, name, dir string, selectFiles bool, selected map[int]bool, rs *btRestore) (string, error) {
 	meta, err := metainfo.Load(bytes.NewReader(raw))
 	if err != nil {
 		return "", fmt.Errorf("解析种子失败: %v", err)
@@ -324,11 +410,19 @@ func (e *BTEngine) addTorrentBytes(raw []byte, name, dir string, selectFiles boo
 	}
 	_ = os.MkdirAll(dir, 0755)
 	keep := filepath.Join(dir, name)
-	_ = os.WriteFile(keep, raw, 0600)
-	return e.register(t, dir, "file://"+keep, selectFiles, selected)
+	if rs == nil || !fileExists(keep) {
+		_ = os.WriteFile(keep, raw, 0600)
+	}
+	e.saveMetainfo(t)
+	return e.register(t, dir, "file://"+keep, selectFiles, selected, rs)
 }
 
-func (e *BTEngine) register(t *torrent.Torrent, dir, uri string, selectFiles bool, selected map[int]bool) (string, error) {
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+func (e *BTEngine) register(t *torrent.Torrent, dir, uri string, selectFiles bool, selected map[int]bool, rs *btRestore) (string, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	ih := strings.ToLower(t.InfoHash().HexString())
@@ -336,7 +430,15 @@ func (e *BTEngine) register(t *torrent.Torrent, dir, uri string, selectFiles boo
 		// 注意：不能 Drop——同一 infohash 在 anacrolix 里是同一个 *Torrent，Drop 会把已有任务一起删掉。
 		return "", &btDuplicateError{GID: old}
 	}
-	gid := e.newGID()
+	prefer := ""
+	added := time.Now()
+	if rs != nil {
+		prefer = rs.GID
+		if !rs.AddedAt.IsZero() {
+			added = rs.AddedAt
+		}
+	}
+	gid := e.pickGIDLocked(ih, prefer)
 	task := &btTask{
 		gid:      gid,
 		t:        t,
@@ -346,8 +448,11 @@ func (e *BTEngine) register(t *torrent.Torrent, dir, uri string, selectFiles boo
 		status:   "waiting",
 		wantPick: selectFiles,
 		selected: selected,
-		addedAt:  time.Now(),
+		addedAt:  added,
 		lastAt:   time.Now(),
+	}
+	if rs != nil {
+		task.completedAt = rs.CompletedAt
 	}
 	// 写盘失败时默认会 DisallowDataDownload，导致「有元数据但速度永远为 0」。
 	// 改为记录错误并保持可下，方便国内盘符/长路径场景自愈。
@@ -390,10 +495,16 @@ func (e *BTEngine) watchMeta(task *btTask) {
 	task.metaOK = true
 	task.infoHash = strings.ToLower(t.InfoHash().HexString())
 	task.errMsg = ""
+	go e.saveMetainfo(t)
 	e.applyPublicTrackers(t)
 	t.AllowDataDownload()
 	t.AllowDataUpload()
-	if task.wantPick {
+	if !task.completedAt.IsZero() && !task.wantPick && e.selectionCompleteLocked(task) {
+		// 重启前已完成：不再重新连接节点；做种时间未到期才继续做种
+		e.applySelectionLocked(task)
+		task.status = "complete"
+		e.afterCompleteLocked(task, time.Now())
+	} else if task.wantPick {
 		for _, f := range t.Files() {
 			f.SetPriority(torrent.PiecePriorityNone)
 		}
@@ -499,12 +610,8 @@ func (e *BTEngine) SetSelection(gid string, selected map[int]bool) error {
 	task.selected = selected
 	task.wantPick = false
 	task.errMsg = ""
-	task.doneOnce = false
 	wasComplete := task.status == "complete" || task.status == "error"
 	e.applySelectionLocked(task)
-	task.t.AllowDataDownload()
-	task.t.AllowDataUpload()
-	task.t.SetMaxEstablishedConns(80)
 	if wasComplete || task.status == "paused" {
 		// 新选中未下完的文件 → 恢复为下载中
 		var need bool
@@ -517,8 +624,14 @@ func (e *BTEngine) SetSelection(gid string, selected map[int]bool) error {
 		}
 		if need {
 			task.status = "active"
+			task.completedAt = time.Time{}
+			task.seeding = false
+		} else if wasComplete {
+			e.afterCompleteLocked(task, time.Now())
 		}
 	}
+	// 只有真正要下载时才放开下载/连接；暂停或已完成且无需下载的任务保持安静
+	e.kickDownloadLocked(task)
 	e.saveSessionLocked()
 	return nil
 }
@@ -560,7 +673,7 @@ func (e *BTEngine) PeerSnapshot(gid string) ([]map[string]any, error) {
 		}
 		out = append(out, map[string]any{
 			"addr": addr, "client": client,
-			"dl": int64(st.DownloadRate), "ul": int64(st.LastWriteUploadRate),
+			"dl": finiteRate(st.DownloadRate), "ul": finiteRate(st.LastWriteUploadRate),
 			"progress": prog, "pieces": have,
 		})
 	}
@@ -662,6 +775,9 @@ func (e *BTEngine) Remove(gid string, deleteFiles bool) error {
 	delete(e.byIH, task.infoHash)
 	e.saveSessionLocked()
 	e.mu.Unlock()
+	if task.infoHash != "" {
+		_ = os.Remove(e.metaPath(task.infoHash))
+	}
 	if deleteFiles {
 		// 未完成的文件是 "<name>.part"（part files 存储）；本程序在下载目录里留的 .torrent 副本也一并删除。
 		var targets []string
@@ -829,7 +945,7 @@ func (e *BTEngine) StartSelected(gid, base string, except []int, skip bool) erro
 		case "none":
 			def = false
 		case "keep":
-			def = files[i].Priority() != torrent.PiecePriorityNone
+			def = len(task.selected) == 0 || task.selected[idx]
 		}
 		if def != ex[idx] {
 			sel[idx] = true
@@ -857,15 +973,21 @@ func (e *BTEngine) FileEntries(gid string) (name string, items []fileEntry, err 
 	if !task.metaOK {
 		return "", nil, fmt.Errorf("元数据尚未就绪")
 	}
+	e.mu.Lock()
+	selected := make(map[int]bool, len(task.selected))
+	for k, v := range task.selected {
+		selected[k] = v
+	}
+	e.mu.Unlock()
 	name = task.t.Name()
 	files := task.t.Files()
 	items = make([]fileEntry, 0, len(files))
 	for i, f := range files {
+		// 没有显式选区 = 全部下载。不能看文件优先级：暂停/下完停止做种时优先级会被设为 None，
+		// 以前因此在「已完成」任务上重选文件时所有文件都显示为未选。
 		sel := true
-		if len(task.selected) > 0 {
-			sel = task.selected[i+1]
-		} else if !task.wantPick {
-			sel = f.Priority() != torrent.PiecePriorityNone
+		if len(selected) > 0 {
+			sel = selected[i+1]
 		}
 		rel := f.DisplayPath()
 		items = append(items, fileEntry{
@@ -916,17 +1038,8 @@ func (e *BTEngine) snapshotLocked(task *btTask) map[string]any {
 				done = task.t.BytesCompleted()
 			}
 			if st == "active" && total > 0 && done >= total {
-				st = "complete"
-				task.status = "complete"
-				if !task.doneOnce {
-					task.doneOnce = true
-					if e.cfgFn().SeedMinutes <= 0 {
-						for _, f := range task.t.Files() {
-							f.SetPriority(torrent.PiecePriorityNone)
-						}
-						task.t.SetMaxEstablishedConns(0)
-					}
-				}
+				e.onCompleteLocked(task, time.Now())
+				st = task.status
 			}
 			btInfo = map[string]any{"info": map[string]any{"name": name}}
 			files = []map[string]any{{
@@ -940,9 +1053,15 @@ func (e *BTEngine) snapshotLocked(task *btTask) map[string]any {
 	}
 	spd, uspd := task.speed, task.upSpeed
 	if st != "active" {
-		spd, uspd = 0, 0
+		spd = 0
+	}
+	if st != "active" && !(st == "complete" && task.seeding) {
+		uspd = 0
 	}
 	errMsg := task.errMsg
+	if st == "active" && task.checking && errMsg == "" {
+		errMsg = "正在校验已下载的数据…"
+	}
 	// 活跃但无速度时，把 peer 发现状态写到 errorMessage，界面状态列/悬停可见
 	if st == "active" && spd == 0 && errMsg == "" && task.metaOK {
 		if conn == 0 && seeds == 0 {
@@ -956,10 +1075,11 @@ func (e *BTEngine) snapshotLocked(task *btTask) map[string]any {
 	m := map[string]any{
 		"gid": task.gid, "status": st,
 		"totalLength": fmt.Sprintf("%d", total), "completedLength": fmt.Sprintf("%d", done),
-		"uploadLength":  "0",
+		"uploadLength":  fmt.Sprintf("%d", task.uploaded),
 		"downloadSpeed": fmt.Sprintf("%d", spd), "uploadSpeed": fmt.Sprintf("%d", uspd),
 		"connections": fmt.Sprintf("%d", conn), "numSeeders": fmt.Sprintf("%d", seeds),
-		"dir": task.dir, "infoHash": task.infoHash, "bittorrent": btInfo, "files": files,
+		"seeder": fmt.Sprintf("%t", task.seeding),
+		"dir":    task.dir, "infoHash": task.infoHash, "bittorrent": btInfo, "files": files,
 		"engine": EngineBT, "engineLabel": e.Label(),
 		"errorMessage": errMsg, "errorCode": "",
 		"btListenPort": e.listen,
@@ -1000,20 +1120,27 @@ func (e *BTEngine) ticker() {
 			}
 			st := task.t.Stats()
 			up := (&st.BytesWrittenData).Int64()
+			rd := (&st.BytesReadUsefulData).Int64()
 			dt := now.Sub(task.lastAt).Seconds()
 			if dt > 0.2 {
-				db := done - task.lastBytes
-				if db < 0 {
-					db = 0
+				dr := rd - task.lastRead
+				if dr < 0 || task.lastAt.IsZero() {
+					dr = 0
 				}
-				task.speed = int64(float64(db) / dt)
+				task.speed = int64(float64(dr) / dt)
 				du := up - task.lastUp
 				if du < 0 {
 					du = 0
 				}
 				task.upSpeed = int64(float64(du) / dt)
 			}
-			task.lastBytes, task.lastUp, task.lastAt = done, up, now
+			task.lastBytes, task.lastUp, task.lastRead, task.lastAt = done, up, rd, now
+			task.uploaded = up
+			if task.status == "active" || task.status == "waiting" {
+				task.checking = torrentChecking(task.t)
+			} else {
+				task.checking = false
+			}
 			total := task.t.Length()
 			if len(task.selected) > 0 {
 				var selTotal int64
@@ -1025,7 +1152,12 @@ func (e *BTEngine) ticker() {
 				total = selTotal
 			}
 			if task.status == "active" && total > 0 && done >= total {
-				task.status = "complete"
+				e.onCompleteLocked(task, now)
+			}
+			if task.status == "complete" && task.seeding && !task.seedUntil.IsZero() && now.After(task.seedUntil) {
+				log.Printf("[bt] %s 做种时间已到，停止做种", task.gid)
+				e.stopSeedingLocked(task)
+				e.saveSessionLocked()
 			}
 			// 有连接却 0 速度：每 5 秒强制踢一次下载（对抗 piece completion / 写盘触发的 DisallowDataDownload）
 			if task.status == "active" && task.speed == 0 && (st.ActivePeers > 0 || st.ConnectedSeeders > 0) {
@@ -1060,6 +1192,9 @@ type btSessionItem struct {
 	Paused   bool   `json:"paused"`
 	WantPick bool   `json:"wantPick"`
 	Selected []int  `json:"selected,omitempty"`
+	// v1.5.3
+	AddedAt     int64 `json:"addedAt,omitempty"`     // unix 毫秒
+	CompletedAt int64 `json:"completedAt,omitempty"` // unix 毫秒；0 = 未完成
 }
 
 func (e *BTEngine) saveSessionLocked() {
@@ -1068,6 +1203,10 @@ func (e *BTEngine) saveSessionLocked() {
 		it := btSessionItem{
 			GID: task.gid, URI: task.uri, Dir: task.dir, InfoHash: task.infoHash,
 			Paused: task.status == "paused", WantPick: task.wantPick,
+			AddedAt: task.addedAt.UnixMilli(),
+		}
+		if !task.completedAt.IsZero() {
+			it.CompletedAt = task.completedAt.UnixMilli()
 		}
 		for i, on := range task.selected {
 			if on {
@@ -1108,21 +1247,35 @@ func (e *BTEngine) restoreSession() {
 			// 用户手动暂停、无选区：恢复后保持暂停（通过 wantPick=false + Pause 路径）
 			selectFiles = false
 		}
+		rs := &btRestore{GID: it.GID}
+		if it.AddedAt > 0 {
+			rs.AddedAt = time.UnixMilli(it.AddedAt)
+		}
+		if it.CompletedAt > 0 {
+			rs.CompletedAt = time.UnixMilli(it.CompletedAt)
+		}
 		var gid string
 		var aerr error
 		switch {
 		case strings.HasPrefix(strings.ToLower(it.URI), "magnet:"):
-			gid, aerr = e.addMagnet(it.URI, it.Dir, selectFiles, selected)
+			gid, aerr = e.addMagnet(it.URI, it.Dir, selectFiles, selected, rs)
 		case strings.HasPrefix(it.URI, "file://"):
 			p := strings.TrimPrefix(it.URI, "file://")
 			raw, rerr := os.ReadFile(p)
+			if rerr != nil && it.InfoHash != "" {
+				// 下载目录里的种子副本被删了：用元数据缓存恢复
+				raw, rerr = os.ReadFile(e.metaPath(it.InfoHash))
+			}
 			if rerr != nil {
 				log.Println("恢复 BT 任务失败:", rerr)
 				continue
 			}
-			gid, aerr = e.addTorrentBytes(raw, filepath.Base(p), it.Dir, selectFiles, selected)
+			gid, aerr = e.addTorrentBytes(raw, filepath.Base(p), it.Dir, selectFiles, selected, rs)
 		default:
 			continue
+		}
+		if gid != "" && it.GID != "" && gid != it.GID {
+			log.Printf("[bt] 恢复任务 ID 变化 %s → %s", it.GID, gid)
 		}
 		if aerr != nil {
 			log.Println("恢复 BT 任务失败:", aerr)
@@ -1146,4 +1299,142 @@ func (e *BTEngine) restoreSession() {
 			}(gid)
 		}
 	}
+}
+
+// selectionCompleteLocked：选中的文件是否都已下完。
+func (e *BTEngine) selectionCompleteLocked(task *btTask) bool {
+	if task.t == nil || !task.metaOK {
+		return false
+	}
+	var total, done int64
+	for i, f := range task.t.Files() {
+		if len(task.selected) > 0 && !task.selected[i+1] {
+			continue
+		}
+		total += f.Length()
+		done += f.BytesCompleted()
+	}
+	return total > 0 && done >= total
+}
+
+// onCompleteLocked：任务刚下完（唯一入口；ticker 与快照都会调用，幂等）。
+func (e *BTEngine) onCompleteLocked(task *btTask, now time.Time) {
+	if task.status == "complete" {
+		return
+	}
+	task.status = "complete"
+	if task.completedAt.IsZero() { // 重启前已完成的任务沿用原完成时间
+		task.completedAt = now
+	}
+	task.speed = 0
+	log.Printf("[bt] %s 下载完成", task.gid)
+	e.afterCompleteLocked(task, now)
+	e.saveSessionLocked()
+}
+
+// afterCompleteLocked：按「下完后做种」设置决定继续做种多久（0 = 立即停止）。
+// v1.5.2 的停止做种逻辑只在界面快照里执行，而后台 ticker 往往先把任务标成完成，
+// 结果设置为 0 时也会一直做种（连接、上传与内存都不会下降）。
+func (e *BTEngine) afterCompleteLocked(task *btTask, now time.Time) {
+	minutes := 0
+	if e.cfgFn != nil {
+		minutes = e.cfgFn().SeedMinutes
+	}
+	until := task.completedAt.Add(time.Duration(minutes) * time.Minute)
+	if minutes <= 0 || task.completedAt.IsZero() || !now.Before(until) {
+		e.stopSeedingLocked(task)
+		return
+	}
+	task.seeding = true
+	task.seedUntil = until
+	task.t.AllowDataUpload()
+	task.t.SetMaxEstablishedConns(40)
+	log.Printf("[bt] %s 做种到 %s", task.gid, until.Format("15:04:05"))
+}
+
+func (e *BTEngine) stopSeedingLocked(task *btTask) {
+	task.seeding = false
+	task.seedUntil = time.Time{}
+	task.upSpeed = 0
+	if task.t == nil || !task.metaOK {
+		return
+	}
+	task.t.DisallowDataUpload()
+	for _, f := range task.t.Files() {
+		f.SetPriority(torrent.PiecePriorityNone)
+	}
+	task.t.SetMaxEstablishedConns(0)
+}
+
+// torrentChecking：是否有分块正在/等待哈希校验。
+func torrentChecking(t *torrent.Torrent) bool {
+	for _, r := range t.PieceStateRuns() {
+		if r.Hashing || r.QueuedForHash {
+			return true
+		}
+	}
+	return false
+}
+
+// finiteRate：anacrolix 的速率在没有数据时可能是 NaN/Inf，转成 int64 会变成
+// -9223372036854775808（详情「节点」页的 ↑ 列曾显示这个值）。
+func finiteRate(v float64) int64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		return 0
+	}
+	if v > 1<<50 {
+		return 0
+	}
+	return int64(v)
+}
+
+// connStats：诊断用，任务数与已建立的连接数。
+func (e *BTEngine) connStats() (tasks, conns int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, task := range e.tasks {
+		tasks++
+		if task.t != nil {
+			conns += len(task.t.PeerConns())
+		}
+	}
+	return
+}
+
+// URIs：全部任务的磁力/种子链接（剪贴板去重用）。
+func (e *BTEngine) URIs() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]string, 0, len(e.tasks))
+	for _, task := range e.tasks {
+		out = append(out, task.uri)
+	}
+	return out
+}
+
+type btLogFilter struct{ slog.Handler }
+
+func (h btLogFilter) Handle(ctx context.Context, r slog.Record) error {
+	if r.Message == "finished hashing piece" {
+		correct := false
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "correct" {
+				correct = a.Value.Kind() == slog.KindBool && a.Value.Bool()
+				return false
+			}
+			return true
+		})
+		if correct {
+			return nil
+		}
+	}
+	return h.Handler.Handle(ctx, r)
+}
+
+func (h btLogFilter) WithAttrs(as []slog.Attr) slog.Handler {
+	return btLogFilter{h.Handler.WithAttrs(as)}
+}
+
+func (h btLogFilter) WithGroup(name string) slog.Handler {
+	return btLogFilter{h.Handler.WithGroup(name)}
 }

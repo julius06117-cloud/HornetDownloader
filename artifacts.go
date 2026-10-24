@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -91,12 +92,25 @@ func (app *App) janitor() {
 	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
 	done := map[string]bool{}
+	lastPrune := time.Now()
 	for {
 		select {
 		case <-app.quit:
 			return
 		case <-t.C:
+		case <-app.guardKick:
+			time.Sleep(300 * time.Millisecond)
 		}
+		app.guardPass()
+		if time.Since(lastPrune) > 10*time.Minute {
+			lastPrune = time.Now()
+			if live, ok := app.liveGIDs(); ok {
+				if n := app.pruneTaskMeta(live); n > 0 {
+					log.Printf("已清理 %d 条过期的任务元数据/来源记录", n)
+				}
+			}
+		}
+		app.saveTaskMeta()
 		var list []ariaStatus
 		if err := app.aria.Call("aria2.tellStopped", []any{0, 1000, []string{"gid", "status", "dir", "infoHash", "followedBy", "bittorrent"}}, &list); err != nil {
 			continue
@@ -114,4 +128,32 @@ func (app *App) janitor() {
 			}
 		}
 	}
+}
+
+// liveGIDs：轮询缓存里的全部任务 ID（含 aria2 磁力的前后任务）。缓存不新鲜或可能被截断时返回 false。
+func (app *App) liveGIDs() (map[string]bool, bool) {
+	app.res.tcMu.Lock()
+	at, errStr, res := app.res.tcAt, app.res.tcErr, app.res.tcResult
+	app.res.tcMu.Unlock()
+	if errStr != "" || res == nil || time.Since(at) > 10*time.Second {
+		return nil, false
+	}
+	live := map[string]bool{}
+	n := 0
+	for _, t := range app.cachedTasks() {
+		n++
+		live[fmt.Sprint(t["gid"])] = true
+		if f, ok := t["following"]; ok && f != nil {
+			live[fmt.Sprint(f)] = true
+		}
+		if fb, ok := t["followedBy"].([]any); ok {
+			for _, x := range fb {
+				live[fmt.Sprint(x)] = true
+			}
+		}
+	}
+	if n >= 900 { // tellWaiting/tellStopped 各取 500 条，接近上限时列表可能不完整
+		return nil, false
+	}
+	return live, true
 }
