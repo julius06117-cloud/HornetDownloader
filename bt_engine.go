@@ -70,6 +70,31 @@ type btTask struct {
 	seeding     bool // 下完后仍在做种（SeedMinutes > 0）
 	seedUntil   time.Time
 	uploaded    int64
+	// v1.5.3：节点页每个节点的上传速度按两次快照间的字节差计算。
+	// anacrolix 的 LastWriteUploadRate 是「最后一次写入」的瞬时速率，会出现单个节点几十 MB/s 的假值。
+	peerMu sync.Mutex
+	peerUp map[string]peerRateSample
+}
+
+type peerRateSample struct {
+	bytes int64
+	at    time.Time
+	rate  int64
+}
+
+// peerUploadRate：返回 key 对应节点的平均上传速度（字节/秒），并刷新采样。
+// 间隔不足 1 秒时沿用上一次的速率，避免频繁刷新时抖动。
+func peerUploadRate(m map[string]peerRateSample, key string, written int64, now time.Time) (int64, peerRateSample) {
+	prev, ok := m[key]
+	if !ok || written < prev.bytes {
+		return 0, peerRateSample{bytes: written, at: now}
+	}
+	dt := now.Sub(prev.at).Seconds()
+	if dt < 1 {
+		return prev.rate, prev
+	}
+	r := int64(float64(written-prev.bytes) / dt)
+	return r, peerRateSample{bytes: written, at: now, rate: r}
 }
 
 // btGIDFor：BT 任务 ID 由 infohash 派生，重启后不变（以前每次启动随机生成，agent 记下的 ID 会失效）。
@@ -654,6 +679,10 @@ func (e *BTEngine) PeerSnapshot(gid string) ([]map[string]any, error) {
 	if task.metaOK {
 		numPieces = task.t.NumPieces()
 	}
+	now := time.Now()
+	task.peerMu.Lock()
+	defer task.peerMu.Unlock()
+	nextUp := make(map[string]peerRateSample, len(conns))
 	for _, cn := range conns {
 		if cn == nil {
 			continue
@@ -672,12 +701,17 @@ func (e *BTEngine) PeerSnapshot(gid string) ([]map[string]any, error) {
 		if numPieces > 0 {
 			prog = float64(have) / float64(numPieces) * 100
 		}
+		ul, sample := peerUploadRate(task.peerUp, addr, (&st.BytesWrittenData).Int64(), now)
+		if addr != "" {
+			nextUp[addr] = sample
+		}
 		out = append(out, map[string]any{
 			"addr": addr, "client": client,
-			"dl": finiteRate(st.DownloadRate), "ul": finiteRate(st.LastWriteUploadRate),
+			"dl": finiteRate(st.DownloadRate), "ul": ul,
 			"progress": prog, "pieces": have,
 		})
 	}
+	task.peerUp = nextUp
 	return out, nil
 }
 

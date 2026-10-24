@@ -273,3 +273,27 @@ func TestHTMLGuardDeletesAgainAfterRestart(t *testing.T) {
 		t.Fatal("re-downloaded html file not deleted after restart")
 	}
 }
+
+func TestPeerUploadRateUsesByteDeltas(t *testing.T) {
+	m := map[string]peerRateSample{}
+	t0 := time.Unix(1000, 0)
+	r, s := peerUploadRate(m, "1.2.3.4:5", 1000, t0)
+	if r != 0 {
+		t.Fatalf("first sample rate = %d, want 0", r)
+	}
+	m["1.2.3.4:5"] = s
+	// 不足 1 秒：沿用上次速率
+	r, s2 := peerUploadRate(m, "1.2.3.4:5", 900000, t0.Add(200*time.Millisecond))
+	if r != 0 || s2.bytes != 1000 {
+		t.Fatalf("sub-second sample: rate=%d bytes=%d", r, s2.bytes)
+	}
+	r, s = peerUploadRate(m, "1.2.3.4:5", 1000+2*1024*1024, t0.Add(2*time.Second))
+	if r != 1024*1024 {
+		t.Fatalf("rate = %d, want 1 MiB/s", r)
+	}
+	m["1.2.3.4:5"] = s
+	// 计数器回绕/重连：从 0 重新开始
+	if r, _ = peerUploadRate(m, "1.2.3.4:5", 10, t0.Add(3*time.Second)); r != 0 {
+		t.Fatalf("after reset rate = %d, want 0", r)
+	}
+}
