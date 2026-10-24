@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Hornet 下载器</title>
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+@font-face{font-family:"HornetUI";src:url("fonts/NotoSansSC-Regular.woff2") format("woff2");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"HornetUI";src:url("fonts/NotoSansSC-Medium.woff2") format("woff2");font-weight:500 700;font-style:normal;font-display:swap}
+@font-face{font-family:"HornetQuote";src:url("fonts/LXGWWenKai-Regular.woff2") format("woff2");font-weight:400;font-style:normal;font-display:swap}
+:root{--bg:#f4f6fa;--panel:#fff;--line:#e5e8ef;--text:#1f2633;--sub:#7a8394;--pri:#2f6bff;--pri2:#e9f0ff;--ok:#19a35b;--warn:#e8a317;--err:#e5484d}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;font:14px/1.45 "HornetUI","Noto Sans SC","Microsoft YaHei UI",sans-serif;color:var(--text);background:var(--bg);user-select:none}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:6px;padding:6px 12px;color:var(--text)}
+button:hover{border-color:#c9cfdb;background:#fafbfd}
+button.pri{background:var(--pri);border-color:var(--pri);color:#fff}
+button.pri:hover{filter:brightness(1.07)}
+button.danger{color:var(--err)}
+button:disabled{opacity:.5;cursor:default}
+input,textarea,select{font:inherit;border:1px solid var(--line);border-radius:6px;padding:6px 8px;color:var(--text);background:#fff;user-select:text}
+input:focus,textarea:focus{outline:none;border-color:var(--pri)}
+#app{display:grid;grid-template-columns:190px 1fr;grid-template-rows:56px 1fr 30px;height:100%}
+header{grid-column:1/3;display:flex;align-items:center;gap:8px;padding:0 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+.logo{font-weight:700;font-size:17px;margin-right:18px;display:flex;align-items:center;gap:8px}
+.logo i{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#2f6bff,#22c1c3);display:inline-block;position:relative}
+.logo i:after{content:"";position:absolute;left:8px;top:6px;border:5px solid transparent;border-top:9px solid #fff;border-bottom:0}
+.grow{flex:1}
+.speed{color:var(--sub);font-variant-numeric:tabular-nums}
+aside{background:var(--panel);border-right:1px solid var(--line);padding:12px 8px}
+.nav{display:flex;justify-content:space-between;padding:9px 12px;border-radius:7px;cursor:pointer;margin-bottom:2px}
+.nav:hover{background:#f3f5f9}
+.nav.on{background:var(--pri2);color:var(--pri);font-weight:600}
+.nav b{font-weight:400;color:var(--sub);font-size:12px}
+main{overflow:auto;padding:12px 16px}
+table{width:100%;border-collapse:separate;border-spacing:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;table-layout:fixed}
+th{font-weight:400;color:var(--sub);text-align:left;font-size:12px;padding:8px 10px;border-bottom:1px solid var(--line);background:#fafbfd}
+td{padding:9px 10px;border-bottom:1px solid #f0f2f6;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+td.stcell{white-space:normal;line-height:1.25;overflow:hidden}
+td.stcell .st{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+td.stcell .stsub{display:block;font-size:11px;color:var(--sub);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ops{white-space:nowrap}
+.ops button{margin-right:3px}
+tr:last-child td{border-bottom:0}
+tr.sel td{background:#f5f8ff}
+tr[data-gid]{cursor:pointer}
+tr[data-gid] .ops{cursor:default}
+.name{font-weight:500;overflow:hidden;text-overflow:ellipsis}
+.tag{display:inline-block;font-size:11px;padding:0 5px;border-radius:4px;margin-right:6px;background:#eef1f6;color:#5b6475;vertical-align:1px}
+.tag.bt{background:#fff3df;color:#b26b00}.tag.mag{background:#f1e9ff;color:#7140d6}.tag.eng{background:#e8f6ef;color:#1a7f4b;margin-left:4px}.tag.eng-aria2{background:#eef1f6;color:#5b6475}.tag.eng-bt{background:#fff3df;color:#b26b00}.tag.eng-ytdlp{background:#ffe8f0;color:#c2185b}
+.bar{height:6px;background:#edf0f5;border-radius:3px;overflow:hidden;margin-top:4px}
+.bar>div{height:100%;background:var(--pri);border-radius:3px;transition:width .5s}
+.bar.done>div{background:var(--ok)}.bar.err>div{background:var(--err)}.bar.pause>div{background:#a8b1c2}
+.st{font-size:12px}.st.active{color:var(--pri)}.st.complete{color:var(--ok)}.st.error{color:var(--err)}.st.paused,.st.waiting{color:var(--sub)}.st.pick{color:var(--warn);font-weight:600}
+.ops button{padding:3px 8px;font-size:12px;margin-right:4px}
+.empty{text-align:center;color:var(--sub);padding:70px 0}
+.empty p{margin:6px}
+footer{grid-column:1/3;display:flex;align-items:center;gap:18px;padding:0 16px;font-size:12px;color:var(--sub);background:var(--panel);border-top:1px solid var(--line)}
+.mask{position:fixed;inset:0;background:rgba(20,26,38,.35);display:none;align-items:center;justify-content:center;z-index:10}
+.mask.on{display:flex}
+.dlg{background:#fff;border-radius:12px;width:600px;max-width:92vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,.2)}
+.dlg h3{margin:0;padding:16px 20px;font-size:16px;border-bottom:1px solid var(--line)}
+.dlg .bd{padding:16px 20px;overflow:auto}
+.dlg .ft{padding:12px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px;align-items:center}
+.row{display:flex;gap:8px;align-items:center;margin:10px 0}
+.row label.k{width:120px;color:var(--sub);flex:none}
+.row input[type=text],.row input[type=number]{flex:1}
+.hint{font-size:12px;color:var(--sub)}
+textarea{width:100%;resize:vertical}
+.drop{border:2px dashed #cdd5e3;border-radius:8px;padding:12px;text-align:center;color:var(--sub);margin-top:10px}
+.drop.on{border-color:var(--pri);background:var(--pri2)}
+.flist{max-height:48vh;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.flist label{display:flex;gap:8px;padding:6px 10px;border-bottom:1px solid #f0f2f6;align-items:center}
+.flist label span.p{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.flist label span.s{color:var(--sub);font-size:12px}
+#toast{position:fixed;left:50%;bottom:48px;transform:translateX(-50%);background:#1f2633;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;display:none;z-index:20;max-width:80vw}
+
+.loveq{flex:1;min-width:0;margin:0 14px;font-family:"HornetQuote","Noto Sans SC",sans-serif;font-size:12.5px;color:#8b7355;font-style:normal;opacity:0;transition:opacity 1.2s ease;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;letter-spacing:.03em}
+.loveq.on{opacity:1}
+.loveq b{font-weight:400;color:#a08b6e;margin:0 .35em}
+.dlg h3{display:flex;align-items:center;gap:8px}
+.dlg h3 .ttl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dlg h3 .xbtn{flex:none;border:0;background:transparent;font-size:20px;line-height:1;padding:2px 8px;color:var(--sub);border-radius:6px}
+.dlg h3 .xbtn:hover{background:#f0f2f6;color:var(--text)}
+#fConn.warn{color:var(--warn);font-weight:600}
+.floading{padding:28px 12px;text-align:center;color:var(--sub)}
+.floading.err{color:var(--err)}
+#filesQ{flex:1;max-width:260px}
+#dragcover{position:fixed;inset:0;background:rgba(47,107,255,.12);border:3px dashed var(--pri);display:none;align-items:center;justify-content:center;font-size:20px;color:var(--pri);z-index:30;pointer-events:none}
+
+#ctxMenu{position:fixed;z-index:40;min-width:168px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(0,0,0,.18);padding:4px;display:none}
+#ctxMenu button{display:block;width:100%;text-align:left;border:0;background:transparent;border-radius:5px;padding:7px 10px;font-size:13px}
+#ctxMenu button:hover{background:var(--pri2);color:var(--pri)}
+#ctxMenu button.danger{color:var(--err)}
+#ctxMenu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+#ctxMenu .dis{opacity:.4;pointer-events:none}
+.ops .more{padding:3px 6px;font-size:14px;letter-spacing:1px}
+.dtabs{display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap}
+.dtabs button{padding:5px 10px;font-size:12px}
+.dtabs button.on{background:var(--pri2);border-color:var(--pri);color:var(--pri);font-weight:600}
+#detBody{min-height:220px;max-height:52vh;overflow:auto;font-size:13px}
+#detBody table{font-size:12px}
+#detBody .kv{display:grid;grid-template-columns:110px 1fr;gap:6px 10px}
+#detBody .kv b{color:var(--sub);font-weight:400}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo"><i></i>Hornet 下载器</div>
+    <button class="pri" id="btnAdd">＋ 新建任务</button>
+    <button id="btnTorrent">打开种子</button>
+    <button id="btnStart">开始</button>
+    <button id="btnPause">暂停</button>
+    <button id="btnRetry">重新开始</button>
+    <button id="btnDel" class="danger">删除</button>
+    <div class="loveq" id="loveq" title=""></div>
+    <span class="speed" id="gspeed">↓ 0 B/s　↑ 0 B/s</span>
+    <button id="btnSet">设置</button>
+  </header>
+  <aside>
+    <div class="nav on" data-v="dl">正在下载 <b id="cDl">0</b></div>
+    <div class="nav" data-v="done">已完成 <b id="cDone">0</b></div>
+    <div class="nav" data-v="err">失败 <b id="cErr">0</b></div>
+  </aside>
+  <main id="main"></main>
+  <footer><span id="fDir"></span><span class="grow"></span><span id="fConn">正在连接下载引擎…</span></footer>
+</div>
+
+<div class="mask" id="mAdd"><div class="dlg">
+  <h3>新建下载任务</h3>
+  <div class="bd">
+    <textarea id="addUrls" rows="7" placeholder="粘贴下载链接，每行一个&#10;支持 http://、https://、ftp://、magnet:?xt=urn:btih:…"></textarea>
+    <div class="drop" id="addDrop">把 .torrent 种子文件拖到这里，或 <a href="#" id="addPick">选择种子文件</a><div id="addFiles" class="hint"></div></div>
+    <div class="row"><label class="k">保存到</label><input type="text" id="addDir"><button id="addDirPick">浏览…</button></div>
+    <div class="row"><label class="k">下载引擎</label>
+      <select id="addEngine" style="max-width:220px">
+        <option value="auto">自动（按链接推荐）</option>
+        <option value="aria2">aria2（HTTP 多线程）</option>
+        <option value="bt">BitTorrent（磁力/种子）</option>
+        <option value="ytdlp">yt-dlp（视频站点）</option>
+      </select>
+      <span class="hint" id="addEngHint" style="flex:1">粘贴链接后显示推荐</span>
+    </div>
+  </div>
+  <div class="ft"><button data-close>取消</button><button class="pri" id="addOk">立即下载</button></div>
+</div></div>
+
+<div class="mask" id="mFiles"><div class="dlg" style="width:720px">
+  <h3 id="filesTitle">选择要下载的文件</h3>
+  <div class="bd">
+    <div class="row" style="margin-top:0"><label><input type="checkbox" id="filesAll" checked> 全选</label><input type="text" id="filesQ" placeholder="搜索文件名"><span class="grow"></span><span class="hint" id="filesSum"></span></div>
+    <div id="filesNav"></div>
+    <div class="flist" id="filesList"></div>
+  </div>
+  <div class="ft"><button data-close>稍后再选</button><button id="filesSkip">跳过选择，全部下载</button><button class="pri" id="filesOk">开始下载</button></div>
+</div></div>
+
+<div class="mask" id="mDel"><div class="dlg" style="width:420px">
+  <h3>删除任务</h3>
+  <div class="bd"><p id="delText" style="margin-top:0"></p><label><input type="checkbox" id="delFiles"> 同时删除已下载的文件</label></div>
+  <div class="ft"><button data-close>取消</button><button class="pri" id="delOk" style="background:var(--err);border-color:var(--err)">删除</button></div>
+</div></div>
+
+
+<div id="ctxMenu" role="menu"></div>
+
+<div class="mask" id="mDet"><div class="dlg" style="width:760px">
+  <h3><span class="ttl" id="detTitle">任务详情</span><button type="button" class="xbtn" data-close title="关闭">×</button></h3>
+  <div class="bd">
+    <div class="dtabs" id="detTabs">
+      <button type="button" data-tab="overview" class="on">概览</button>
+      <button type="button" data-tab="files">文件</button>
+      <button type="button" data-tab="trackers">Tracker</button>
+      <button type="button" data-tab="peers">来源/节点</button>
+    </div>
+    <div id="detBody"><div class="floading">加载中…</div></div>
+  </div>
+  <div class="ft"><button data-close>关闭</button></div>
+</div></div>
+
+<div class="mask" id="mSet"><div class="dlg">
+  <h3>设置</h3>
+  <div class="bd">
+    <div class="row"><label class="k">默认下载目录</label><input type="text" id="sDir"><button id="sDirPick">浏览…</button></div>
+    <div class="row"><label class="k">同时下载任务数</label><input type="number" id="sConc" min="1" max="50" style="max-width:100px"></div>
+    <div class="row"><label class="k">下载限速</label><input type="number" id="sDl" min="0" style="max-width:120px"> KB/s <span class="hint">0 为不限速</span></div>
+    <div class="row"><label class="k">上传限速</label><input type="number" id="sUl" min="0" style="max-width:120px"> KB/s <span class="hint">0 为不限速</span></div>
+    <div class="row"><label class="k">单任务连接数</label><input type="number" id="sSplit" min="1" max="16" style="max-width:100px"> <span class="hint">HTTP 多线程分段下载，1–16</span></div>
+    <div class="row"><label class="k">下完后做种</label><input type="number" id="sSeed" min="0" style="max-width:100px"> 分钟 <span class="hint">0 为下完立即停止做种</span></div>
+    <div class="row"><label class="k">种子/磁力</label><label><input type="checkbox" id="sPick"> 开始下载前先选择文件</label></div>
+    <div class="row"><label class="k">磁盘空间分配</label><select id="sAlloc"><option value="auto">自动（推荐）</option><option value="prealloc">预先分配（Windows 推荐，不卡界面）</option><option value="none">不预先分配</option><option value="trunc">仅设置文件长度</option></select></div>
+    <div class="row"><label class="k">默认引擎</label>
+      <select id="sEngine" style="max-width:260px">
+        <option value="auto">自动（按链接类型推荐）</option>
+        <option value="aria2">强制 aria2</option>
+        <option value="bt">强制 BitTorrent（仅磁力/种子）</option>
+        <option value="ytdlp">强制 yt-dlp（视频页）</option>
+      </select>
+    </div>
+    <div class="row"><label class="k">关闭窗口</label><label><input type="checkbox" id="sTray"> 关闭窗口时最小化到托盘</label></div>
+    <div class="row" style="align-items:flex-start"><label class="k">额外 Tracker</label><textarea id="sTrk" rows="3" placeholder="每行一个，可留空（已内置公共 Tracker 列表）"></textarea></div>
+    <div class="row" style="align-items:flex-start"><label class="k">浏览器关联</label>
+      <div style="flex:1">
+        <div class="hint" id="sAssocHint">可将本程序设为 magnet: 协议和 .torrent 文件的默认打开方式。完整浏览器扩展暂未内置，Chrome/Edge 点磁力链接或「打开方式」即可调用本程序。</div>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" id="sAssocReg">注册关联</button>
+          <button type="button" id="sAssocUnreg">取消关联</button>
+          <span class="hint" id="sAssocSt"></span>
+        </div>
+      </div>
+    </div>
+    <p class="hint" id="sInfo"></p>
+  </div>
+  <div class="ft"><button data-close>取消</button><button class="pri" id="sOk">保存</button></div>
+</div></div>
+
+
+<div class="mask" id="mClip"><div class="dlg" style="width:520px">
+  <h3>检测到下载链接</h3>
+  <div class="bd">
+    <p class="hint" style="margin-top:0">剪贴板里出现了可下载的链接，是否添加为任务？</p>
+    <textarea id="clipUrls" rows="6" readonly style="width:100%"></textarea>
+  </div>
+  <div class="ft"><button data-close id="clipNo">忽略</button><button class="pri" id="clipYes">添加下载</button></div>
+</div></div>
+
+<input type="file" id="fileInput" accept=".torrent,application/x-bittorrent" multiple style="display:none">
+<div id="toast"></div>
+<div id="dragcover">松开鼠标添加种子文件</div>
+
+<script>
+"use strict";
+const TOKEN = new URLSearchParams(location.search).get("t") || "";
+// 全局错误兜底：写入 app.log，并撤掉所有遮罩，保证界面永远可点。
+function uiLog(level, msg, stack, src) {
+  try {
+    fetch("/api/log", {method: "POST", headers: {"X-Token": TOKEN, "Content-Type": "application/json"},
+      body: JSON.stringify({level, msg: String(msg || "").slice(0, 1000), stack: String(stack || "").slice(0, 3000), src: String(src || "")})}).catch(() => {});
+  } catch (e) {}
+}
+let recovering = false;
+function recoverUI(reason) {
+  if (recovering) return; recovering = true;
+  try {
+    document.querySelectorAll(".mask.on").forEach(m => m.classList.remove("on"));
+    const dc = document.getElementById("dragcover"); if (dc) dc.style.display = "none";
+    if (typeof resetFilesDlg === "function") resetFilesDlg();
+    clipBusy = false;
+    if (typeof toast === "function") toast("界面出错，已自动恢复：" + String(reason || "").slice(0, 80), 5000);
+  } catch (e) {} finally { recovering = false; }
+}
+window.addEventListener("error", e => { uiLog("error", e.message, e.error && e.error.stack, (e.filename || "") + ":" + (e.lineno || 0)); recoverUI(e.message); });
+window.addEventListener("unhandledrejection", e => { const r = e.reason || {}; uiLog("unhandledrejection", r.message || String(r), r.stack, ""); recoverUI(r.message || String(r)); });
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let view = "dl", tasks = [], selected = new Set(), cfg = null, canPick = false;
+let pendingPick = new Set();
+let pendingMeta = new Set();
+let dlgFilesGid = null, delGids = [];
+let filesData = [], filesPage = 0;
+const FILES_PAGE = 200;
+let clipBusy = false, ignoredClip = new Set();
+let actionBusy = false;
+const inflight = new Set(); // 正在提交操作的任务，防止连点刷爆请求
+
+async function api(path, body, timeoutMs) {
+  const ctrl = new AbortController();
+  const ms = timeoutMs || 8000;
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: {"X-Token": TOKEN, "Content-Type": "application/json"},
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: ctrl.signal
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    if (j.error) throw new Error(j.error);
+    return j;
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("请求超时");
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+const rpc = async (method, ...params) => (await api("/api/rpc", {method, params}, method === "aria2.getFiles" || method === "aria2.addTorrent" ? 50000 : 12000)).result;
+function toast(msg, ms) { const t = $("#toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = "none", ms || 2600); }
+
+function fmtSize(n) { n = +n || 0; const u = ["B","KB","MB","GB","TB"]; let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; } return (i ? n.toFixed(n < 10 ? 2 : n < 100 ? 1 : 0) : n) + " " + u[i]; }
+function fmtEta(s) { if (!isFinite(s) || s <= 0) return "--"; s = Math.round(s); if (s > 86400 * 7) return "> 7天"; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; if (d) return d + "天" + h + "时"; if (h) return h + ":" + String(m).padStart(2,"0") + ":" + String(x).padStart(2,"0"); return m + ":" + String(x).padStart(2,"0"); }
+const base = p => { p = String(p || "").replace(/[\\/]+$/, ""); return p.split(/[\\/]/).pop(); };
+
+function isMeta(t) {
+  if (!t.bittorrent) return false;
+  if (t.bittorrent.info && t.bittorrent.info.name) return false;
+  if (t.files && t.files[0] && String(t.files[0].path).startsWith("[METADATA]")) return true;
+  return true; // 有 bittorrent 但尚无 info.name：元数据阶段
+}
+function taskName(t) {
+  if (t.bittorrent && t.bittorrent.info && t.bittorrent.info.name) return t.bittorrent.info.name;
+  if (isMeta(t)) return "磁力链接 " + (t.infoHash || "").slice(0, 12) + "…（获取元数据中）";
+  const f = t.files && t.files[0];
+  if (f && f.path) return base(f.path);
+  if (f && f.uris && f.uris.length) { try { return decodeURIComponent(base(f.uris[0].uri.split(/[?#]/)[0])) || f.uris[0].uri; } catch (e) { return f.uris[0].uri; } }
+  return t.gid;
+}
+function taskType(t) { if (!t.bittorrent) return t.engine === "ytdlp" ? ["视频", "mag"] : ["HTTP", ""]; if (isMeta(t) || t.following) return ["磁力", "mag"]; return ["BT", "bt"]; }
+function engineBadge(t) {
+  const id = t.engine || "aria2";
+  const label = t.engineLabel || id;
+  return '<span class="tag eng eng-' + id + '" title="下载引擎">' + esc(label) + '</span>';
+}
+function needsPick(t) { return t.status === "paused" && t.bittorrent && t.bittorrent.info && +t.completedLength === 0; }
+function statusText(t) {
+  // returns [shortLabel, cssClass, tipFull, subLine]
+  switch (t.status) {
+    case "active":
+      if (t.verifyIntegrityPending === "true" || (+t.verifiedLength > 0)) return ["校验中", "active", "正在校验完整性", ""];
+      if (t.seeder === "true" && t.bittorrent) return ["做种中", "complete", "做种中", ""];
+      if (isMeta(t)) return ["获取元数据", "active", "正在获取磁力元数据", ""];
+      if (t.engine === "bt" && +t.downloadSpeed === 0 && t.errorMessage) {
+        const msg = String(t.errorMessage);
+        return [msg.length > 8 ? "下载中" : msg, "active", msg, ""];
+      }
+      if (t.engine === "bt" || t.bittorrent) {
+        const c = +(t.connections||0), s = +(t.numSeeders||0);
+        const total = +(t.btTotalPeers||0), half = +(t.btHalfOpen||0);
+        const tip = "下载中 · 连接 " + c + " · 种子 " + s + " · 候选 " + total + " · 握手 " + half + (t.btListenPort ? (" · 监听 " + t.btListenPort) : "");
+        const sub = c || s || total ? ("连" + c + (total ? "/" + total : "") + " · 种" + s) : "";
+        const short = (+t.downloadSpeed > 0) ? "下载中" : (c > 0 ? ("连接中 " + c + (total ? "/" + total : "")) : "下载中");
+        return [short, "active", tip, sub];
+      }
+      return ["下载中", "active", "下载中", ""];
+    case "waiting": return ["排队中", "waiting", "排队等待中", ""];
+    case "paused": {
+      const pick = needsPick(t) && cfg && cfg.selectBTFiles;
+      return pick ? ["待选择文件", "pick", "请选择要下载的文件", ""] : ["已暂停", "paused", "已暂停", ""];
+    }
+    case "complete": return ["已完成", "complete", "已完成", ""];
+    case "error": {
+      const msg = "失败：" + (t.errorMessage || ("错误码 " + t.errorCode));
+      return ["失败", "error", msg, (t.errorMessage || "").slice(0, 24)];
+    }
+    case "removed": return ["已删除", "paused", "已删除", ""];
+  }
+  return [t.status, "", t.status, ""];
+}
+function filePath(t) {
+  if (t.bittorrent && t.bittorrent.info && t.bittorrent.info.name && t.files && t.files.length > 1) return (t.dir || "") + "/" + t.bittorrent.info.name;
+  if (t.bittorrent && t.bittorrent.info && t.bittorrent.info.name) return (t.dir || "") + "/" + t.bittorrent.info.name;
+  return t.files && t.files[0] && t.files[0].path ? t.files[0].path : t.dir;
+}
+
+let polling = false, failCount = 0;
+function setConn(text, warn) { const el = $("#fConn"); if (el.textContent !== text) el.textContent = text; el.classList.toggle("warn", !!warn); }
+async function poll() {
+  if (polling) return; polling = true;
+  try {
+    // 服务端只读缓存，立即返回；aria2 卡住时 stale=true，界面照常可点。
+    const j = await api("/api/tasks", undefined, 5000);
+    failCount = 0;
+    (j.notices || []).forEach(n => toast(n.msg, n.level === "error" ? 6000 : 2600));
+    const ar = j.aria || {};
+    if (j.result) {
+      const r = j.result;
+      let all = [].concat(r[0] || [], r[1] || [], r[2] || []);
+      for (const t of all) if ((t.status === "complete" || t.status === "removed") && t.followedBy && t.followedBy.length) {
+        if (pendingMeta.has(t.gid)) { t.followedBy.forEach(g => pendingPick.add(g)); pendingMeta.delete(t.gid); }
+        if (!j.stale) api("/api/rpc", {method: "aria2.removeDownloadResult", params: [t.gid]}, 5000).catch(() => {});
+      }
+      all = all.filter(t => !((t.status === "complete" || t.status === "removed") && t.followedBy && t.followedBy.length));
+      tasks = all;
+      const g = r[3] || {};
+      $("#gspeed").textContent = "↓ " + fmtSize(g.downloadSpeed) + "/s　↑ " + fmtSize(g.uploadSpeed) + "/s";
+      render();
+    }
+    if (j.stale || ar.ok === false) {
+      const sec = Math.round(Math.max(ar.stalledMs || 0, j.ageMs || 0) / 1000);
+      setConn(j.result ? "下载引擎响应慢（多为磁盘繁忙），正在重连…" + (sec ? "已 " + sec + " 秒" : "") + "，界面仍可操作" : "正在连接下载引擎…", true);
+    } else {
+      const g = (j.result && j.result[3]) || {};
+      setConn("下载中 " + (g.numActive || 0) + " · 排队 " + (g.numWaiting || 0), false);
+      if (cfg && cfg.selectBTFiles && !fd && !document.querySelector(".mask.on")) {
+        const t = tasks.find(t => pendingPick.has(t.gid) && needsPick(t));
+        if (t) { pendingPick.delete(t.gid); openFiles(t.gid); }
+      }
+    }
+  } catch (e) {
+    if (++failCount > 2) setConn("与程序后台的连接中断：" + e.message + "，正在重试…", true);
+  } finally { polling = false; }
+}
+function inView(t) {
+  if (view === "dl") return ["active","waiting","paused"].includes(t.status);
+  if (view === "done") return t.status === "complete";
+  return t.status === "error" || t.status === "removed";
+}
+// 按单元格增量更新：不整表重建，避免点击按钮时按钮被替换导致点击丢失。
+let tableEl = null;
+function buildOps(t) {
+  // Pure helper: exactly one pause/resume control; 停止/删除只在右键菜单。
+  let ops = "";
+  const busy = inflight.has(t.gid);
+  if (t.status === "paused") {
+    ops += needsPick(t)
+      ? btn("pick", "选择文件") + btn("resume", busy ? "处理中…" : "开始")
+      : btn("resume", busy ? "处理中…" : "继续");
+  } else if (t.status === "active" || t.status === "waiting") {
+    ops += btn("pause", busy ? "处理中…" : "暂停");
+  }
+  if (t.status === "error" || t.status === "removed") ops += btn("retry", "重新开始");
+  if (t.status === "complete" || t.status === "error") ops += btn("open", "打开");
+  if (t.bittorrent && t.bittorrent.info && !needsPick(t)) ops += btn("pick", "选文件");
+  ops += btn("more", "⋯", "more");
+  return ops;
+}
+function rowCells(t) {
+  const total = +t.totalLength, done = +t.completedLength, spd = +t.downloadSpeed;
+  const pct = total ? Math.min(100, done / total * 100) : (t.status === "complete" ? 100 : 0);
+  const [tp, tc] = taskType(t), [st, sc, tip, sub] = statusText(t);
+  const barCls = t.status === "complete" ? "done" : t.status === "error" ? "err" : t.status === "active" ? "" : "pause";
+  let speed = t.status === "active" ? fmtSize(spd) + "/s" : "";
+  if (t.status === "active" && t.seeder === "true" && t.bittorrent) speed = "↑ " + fmtSize(t.uploadSpeed) + "/s";
+  const eta = t.status === "active" && spd > 0 && total > done ? fmtEta((total - done) / spd) : "--";
+  const ops = buildOps(t);
+  const tipFull = tip || st;
+  const extra = t.bittorrent && t.status === "active" && !(t.seeder === "true")
+    ? ' title="' + esc(tipFull) + '"' : (speed ? ' title="' + esc(speed) + '"' : "");
+  const name = esc(taskName(t));
+  const stHtml = '<span class="st ' + sc + '">' + esc(st) + '</span>'
+    + (sub ? '<span class="stsub">' + esc(sub) + '</span>' : "");
+  return [
+    '<input type="checkbox" class="sel"' + (selected.has(t.gid) ? " checked" : "") + '>',
+    '<div class="name" title="' + name + '"><span class="tag ' + tc + '">' + tp + '</span>' + engineBadge(t) + name + '</div>',
+    total ? fmtSize(total) : "--",
+    '<div class="hint">' + pct.toFixed(1) + '%' + (total ? " · " + fmtSize(done) : "") + '</div><div class="bar ' + barCls + '"><div style="width:' + pct + '%"></div></div>',
+    '<span' + extra + '>' + speed + '</span>',
+    eta,
+    stHtml,
+    ops
+  ];
+}
+function render() {
+  $("#cDl").textContent = tasks.filter(t => ["active","waiting","paused"].includes(t.status)).length;
+  $("#cDone").textContent = tasks.filter(t => t.status === "complete").length;
+  $("#cErr").textContent = tasks.filter(t => t.status === "error" || t.status === "removed").length;
+  const list = tasks.filter(inView);
+  const gids = new Set(tasks.map(t => t.gid));
+  for (const g of [...selected]) if (!gids.has(g)) selected.delete(g);
+  const main = $("#main");
+  if (!list.length) {
+    tableEl = null;
+    const html = '<div class="empty"><p style="font-size:40px">⇩</p><p>' + (view === "dl" ? "没有正在进行的任务" : view === "done" ? "还没有已完成的任务" : "没有失败的任务") + '</p><p class="hint">点击「新建任务」粘贴链接，或把 .torrent 种子拖进窗口</p></div>';
+    if (main.__empty !== html) { main.innerHTML = html; main.__empty = html; }
+    return;
+  }
+  main.__empty = null;
+  if (!tableEl || !main.contains(tableEl)) {
+    main.innerHTML = '<table><colgroup><col style="width:34px"><col><col style="width:84px"><col style="width:150px"><col style="width:88px"><col style="width:72px"><col style="width:118px"><col style="width:168px"></colgroup>' +
+      '<thead><tr><th><input type="checkbox" id="selAll"></th><th>名称</th><th>大小</th><th>进度</th><th>速度</th><th>剩余时间</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody></table>';
+    tableEl = main.querySelector("table");
+  }
+  const tb = tableEl.tBodies[0];
+  const keep = new Set(list.map(t => t.gid));
+  [...tb.rows].forEach(tr => { if (!keep.has(tr.dataset.gid)) tr.remove(); });
+  const have = new Map([...tb.rows].map(tr => [tr.dataset.gid, tr]));
+  list.forEach((t, i) => {
+    let tr = have.get(t.gid);
+    if (!tr) { tr = document.createElement("tr"); tr.dataset.gid = t.gid; for (let k = 0; k < 8; k++) tr.appendChild(document.createElement("td")); tr.cells[7].className = "ops"; }
+    const cells = rowCells(t);
+    const [, , tip] = statusText(t);
+    for (let k = 0; k < 8; k++) {
+      if (k === 6) {
+        tr.cells[6].className = "stcell";
+        tr.cells[6].title = tip || "";
+      }
+      if (tr.cells[k].__h !== cells[k]) { tr.cells[k].innerHTML = cells[k]; tr.cells[k].__h = cells[k]; }
+    }
+    tr.classList.toggle("sel", selected.has(t.gid));
+    if (tb.rows[i] !== tr) tb.insertBefore(tr, tb.rows[i] || null);
+  });
+  const sa = document.getElementById("selAll"); if (sa) sa.checked = list.every(t => selected.has(t.gid));
+}
+const btn = (a, label, cls) => '<button data-a="' + a + '"' + (cls ? ' class="' + cls + '"' : "") + '>' + label + '</button>';
+
+// 暂停/开始/删除交给后台队列，接口立即返回；aria2 卡住时点击也不会「没反应」。
+async function taskAction(action, gids, extra) {
+  gids = gids.filter(g => !inflight.has(g));
+  if (!gids.length) return;
+  gids.forEach(g => inflight.add(g)); render();
+  try { await api("/api/action", Object.assign({action, gids}, extra || {}), 8000); }
+  catch (e) { toast("操作失败：" + e.message, 5000); }
+  finally { setTimeout(() => { gids.forEach(g => inflight.delete(g)); render(); }, 1200); poll(); }
+}
+function syncRowSelect(tr, gid) {
+  const on = selected.has(gid);
+  const cb = tr.querySelector('input.sel[type="checkbox"]');
+  if (cb) cb.checked = on;
+  tr.classList.toggle("sel", on);
+  const list = tasks.filter(inView);
+  const selAll = document.getElementById("selAll");
+  if (selAll) selAll.checked = list.length > 0 && list.every(t => selected.has(t.gid));
+}
+$("#main").addEventListener("click", async e => {
+  const tr = e.target.closest("tr[data-gid]");
+  if (e.target.id === "selAll") { const on = e.target.checked; tasks.filter(inView).forEach(t => on ? selected.add(t.gid) : selected.delete(t.gid)); render(); return; }
+  if (!tr) return;
+  const gid = tr.dataset.gid, t = tasks.find(x => x.gid === gid);
+  // 勾选框：跟浏览器原生切换同步
+  if (e.target.matches('input.sel[type="checkbox"]')) {
+    e.target.checked ? selected.add(gid) : selected.delete(gid);
+    syncRowSelect(tr, gid);
+    return;
+  }
+  // 操作按钮 / 链接：不切换选中
+  const btnEl = e.target.closest("button[data-a]");
+  if (btnEl) {
+    const a = btnEl.dataset.a; if (!a || !t) return;
+    try {
+      if (a === "pause") await taskAction("pause", [gid]);
+      if (a === "resume") await taskAction("unpause", [gid]);
+      if (a === "pick") openFiles(gid, {reselect: !needsPick(t)});
+      if (a === "open") await api("/api/open", {path: filePath(t)});
+      if (a === "del") askDelete([gid]);
+      if (a === "retry") await retryTasks([gid]);
+      if (a === "more") { showCtxMenu(btnEl.getBoundingClientRect().left, btnEl.getBoundingClientRect().bottom + 4, t); return; }
+      if (a === "details") openDetails(gid);
+    } catch (err) { toast("操作失败：" + err.message); }
+    return;
+  }
+  if (e.target.closest("a")) return;
+  // 点整行任意位置切换选中
+  if (selected.has(gid)) selected.delete(gid); else selected.add(gid);
+  syncRowSelect(tr, gid);
+});
+
+document.querySelectorAll(".nav").forEach(n => n.onclick = () => { document.querySelectorAll(".nav").forEach(x => x.classList.remove("on")); n.classList.add("on"); view = n.dataset.v; selected.clear(); render(); });
+document.querySelectorAll("[data-close]").forEach(b => b.onclick = () => closeDlg(b.closest(".mask")));
+function openDlg(id) { $(id).classList.add("on"); }
+function closeDlg(m) {
+  if (!m) return;
+  m.classList.remove("on");
+  try {
+    if (m.id === "mFiles") resetFilesDlg();
+    if (m.id === "mClip") clipBusy = false;
+    if (m.id === "mDet" && det && det.timer) { clearInterval(det.timer); det.timer = null; }
+    const menu = document.getElementById("ctxMenu");
+    if (menu) menu.style.display = "none";
+  } catch (e) { uiLog("error", "closeDlg: " + e.message, e.stack); }
+}
+// 每个对话框标题栏都有 ✕；Esc 在捕获阶段处理，任何情况下都能关掉遮罩。
+document.querySelectorAll(".dlg > h3").forEach(h => {
+  const t = document.createElement("span"); t.className = "ttl"; while (h.firstChild) t.appendChild(h.firstChild); h.appendChild(t);
+  if (h.id) { t.id = h.id; h.removeAttribute("id"); }
+  const x = document.createElement("button"); x.type = "button"; x.className = "xbtn"; x.title = "关闭 (Esc)"; x.textContent = "✕";
+  x.onclick = () => closeDlg(h.closest(".mask")); h.appendChild(x);
+});
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  const menu = document.getElementById("ctxMenu");
+  if (menu && menu.style.display === "block") { e.preventDefault(); menu.style.display = "none"; return; }
+  const on = document.querySelectorAll(".mask.on");
+  if (on.length) { e.preventDefault(); on.forEach(closeDlg); }
+}, true);
+
+function targetGids(filter) { const list = tasks.filter(inView); const sel = list.filter(t => selected.has(t.gid)); return (sel.length ? sel : list).filter(filter).map(t => t.gid); }
+$("#btnStart").onclick = () => { const g = targetGids(t => t.status === "paused"); if (g.length) taskAction("unpause", g); };
+$("#btnPause").onclick = () => { const g = targetGids(t => t.status === "active" || t.status === "waiting"); if (g.length) taskAction("pause", g); };
+$("#btnDel").onclick = () => { const g = tasks.filter(inView).filter(t => selected.has(t.gid)).map(t => t.gid); if (!g.length) return toast("请先勾选要删除的任务"); askDelete(g); };
+$("#btnRetry").onclick = async () => {
+  if (actionBusy) return;
+  const list = tasks.filter(inView).filter(t => t.status === "error");
+  const sel = list.filter(t => selected.has(t.gid));
+  const g = (sel.length ? sel : list).map(t => t.gid);
+  if (!g.length) return toast(view === "err" ? "没有可重新开始的失败任务" : "请先勾选失败的任务");
+  actionBusy = true;
+  try { await retryTasks(g); } finally { actionBusy = false; }
+};
+
+async function retryTasks(gids) {
+  const j = await api("/api/retry", {gids}, 30000);
+  const n = j.retried || gids.length;
+  toast(j.warning ? ("已重新开始 " + n + " 个任务；部分失败：" + j.warning) : ("已重新开始 " + n + " 个任务"), j.warning ? 6000 : 2600);
+  view = "dl";
+  document.querySelectorAll(".nav").forEach(x => x.classList.toggle("on", x.dataset.v === "dl"));
+  gids.forEach(g => selected.delete(g));
+  poll();
+}
+function friendlyAddErr(msg) {
+  const m = String(msg || "");
+  const low = m.toLowerCase();
+  if (low.includes("being downloaded by other command") || low.includes("file already in download") || m.includes("另一个下载任务") || m.includes("正被另一个任务占用")) {
+    return "目标文件名正被另一个任务占用（常见于同时添加同一 ISO 的 HTTP 链接和 .torrent）。请先暂停或删除其中一个，或换保存目录。";
+  }
+  if (m.includes("未找到 yt-dlp") || low.includes("yt-dlp") && (low.includes("not found") || low.includes("no such") || m.includes("找不到"))) {
+    return "未找到 yt-dlp。请把它放到程序目录，或安装到系统 PATH 后再用视频站链接。";
+  }
+  return m;
+}
+
+function askDelete(gids) {
+  delGids = gids;
+  $("#delText").textContent = gids.length === 1 ? "确定删除任务「" + taskName(tasks.find(t => t.gid === gids[0]) || {gid: gids[0]}) + "」吗？" : "确定删除选中的 " + gids.length + " 个任务吗？";
+  $("#delFiles").checked = false;
+  openDlg("#mDel");
+}
+$("#delOk").onclick = async () => {
+  closeDlg($("#mDel"));
+  const g = delGids.slice(); g.forEach(x => selected.delete(x));
+  await taskAction("delete", g, {deleteFiles: $("#delFiles").checked});
+};
+
+let addTorrents = [];
+function openAdd(prefill) {
+  $("#addUrls").value = prefill || ""; addTorrents = []; $("#addFiles").textContent = "";
+  $("#addDir").value = cfg ? cfg.downloadDir : ""; $("#addDirPick").style.display = canPick ? "" : "none";
+  $("#addEngine").value = (cfg && cfg.defaultEngine) ? cfg.defaultEngine : "auto";
+  updateAddHint();
+  openDlg("#mAdd"); setTimeout(() => $("#addUrls").focus(), 50);
+}
+let addHintTimer = null;
+function updateAddHint() {
+  const lines = ($("#addUrls").value || "").split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const engSel = $("#addEngine").value;
+  if (addTorrents.length && !lines.length) {
+    $("#addEngHint").textContent = engSel === "auto" ? "种子文件推荐 BitTorrent 引擎" : ("将使用 " + ($("#addEngine").selectedOptions[0] || {}).text);
+    return;
+  }
+  if (!lines.length) { $("#addEngHint").textContent = "粘贴链接后显示推荐"; return; }
+  const u = lines[0];
+  api("/api/recommend", {url: u}, 5000).then(j => {
+    if (engSel === "auto") $("#addEngHint").textContent = j.hint || ("推荐 " + (j.label || j.recommended));
+    else $("#addEngHint").textContent = "已手动选择引擎（推荐：" + (j.label || j.recommended) + "）";
+  }).catch(() => {});
+}
+$("#addUrls").addEventListener("input", () => { clearTimeout(addHintTimer); addHintTimer = setTimeout(updateAddHint, 280); });
+$("#addEngine").addEventListener("change", updateAddHint);
+$("#btnAdd").onclick = () => openAdd("");
+$("#btnTorrent").onclick = () => { $("#fileInput").dataset.direct = "1"; $("#fileInput").click(); };
+$("#addPick").onclick = e => { e.preventDefault(); $("#fileInput").dataset.direct = ""; $("#fileInput").click(); };
+function readB64(file) { return new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1]); r.onerror = bad; r.readAsDataURL(file); }); }
+async function loadTorrentFiles(files) {
+  const out = [];
+  for (const f of files) { if (!/\.torrent$/i.test(f.name)) { toast("不是种子文件：" + f.name); continue; } out.push({name: f.name, b64: await readB64(f)}); }
+  return out;
+}
+$("#fileInput").onchange = async e => {
+  const list = await loadTorrentFiles([...e.target.files]); e.target.value = "";
+  if (!list.length) return;
+  if (e.target.dataset.direct === "1" && !$("#mAdd").classList.contains("on")) { addTorrents = list; await submitAdd([], list, cfg.downloadDir); }
+  else { addTorrents = addTorrents.concat(list); $("#addFiles").textContent = "已选择：" + addTorrents.map(t => t.name).join("，"); }
+};
+async function submitAdd(lines, torrents, dir, engine) {
+  // 对话框打开且未显式传 engine → 用下拉框；其它入口传 ""，走设置默认（auto 则跟推荐）
+  if (engine === undefined || engine === null) {
+    engine = ($("#addEngine") && $("#mAdd").classList.contains("on")) ? $("#addEngine").value : "";
+  }
+  for (const l of lines) {
+    if (!/^(https?|ftp|sftp):\/\//i.test(l) && !/^magnet:\?/i.test(l)) {
+      toast("不支持的链接：" + l.slice(0, 40));
+      return;
+    }
+  }
+  try {
+    const j = await api("/api/add", {
+      engine, dir: dir || "",
+      urls: lines,
+      torrents: (torrents || []).map(t => ({name: t.name, b64: t.b64}))
+    }, 120000);
+    const added = j.added || [];
+    for (const a of added) {
+      if (a.engine === "aria2" && /^magnet:/i.test(a.url || "")) pendingMeta.add(a.gid);
+      if (cfg && cfg.selectBTFiles) {
+        if (a.engine === "aria2" && a.name) pendingPick.add(a.gid);
+        if (a.engine === "bt") pendingPick.add(a.gid);
+      }
+    }
+    const ok = added.length;
+    const bad = j.errors || [];
+    const existing = added.filter(a => a.existing);
+    const fallbacks = added.filter(a => a.fallback);
+    if (bad.length) toast("添加 " + ok + " 个，失败 " + bad.length + " 个：" + friendlyAddErr(bad[0]), 7000);
+    else if (existing.length && existing.length === ok) toast("任务已在列表中（" + (existing[0].engineLabel || existing[0].engine) + "）");
+    else if (ok) {
+      const engN = {};
+      added.forEach(a => { engN[a.engineLabel || a.engine] = (engN[a.engineLabel || a.engine] || 0) + 1; });
+      const who = Object.keys(engN).map(k => k + "×" + engN[k]).join("、");
+      let msg = "已添加 " + ok + " 个任务（" + who + "）";
+      if (fallbacks.length) msg += "；" + fallbacks[0].fallback;
+      if (existing.length) msg += "；其中 " + existing.length + " 个已在列表";
+      toast(msg, fallbacks.length ? 7000 : 2600);
+    }
+  } catch (e) {
+    toast("添加失败：" + friendlyAddErr(e.message), 7000);
+  }
+  view = "dl"; document.querySelectorAll(".nav").forEach(x => x.classList.toggle("on", x.dataset.v === "dl"));
+  poll();
+}
+$("#addOk").onclick = async () => {
+  const lines = $("#addUrls").value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if (!lines.length && !addTorrents.length) return toast("请粘贴链接或选择种子文件");
+  const dir = $("#addDir").value.trim();
+  const eng = $("#addEngine").value;
+  closeDlg($("#mAdd"));
+  await submitAdd(lines, addTorrents, dir, eng); addTorrents = [];
+};
+$("#addDirPick").onclick = async () => { const p = await pickDir(); if (p) $("#addDir").value = p; };
+async function pickDir() { try { return (await api("/api/pickdir", {}, 120000)).path; } catch (e) { toast(e.message); return ""; } }
+
+const addDrop = $("#addDrop");
+let dragDepth = 0;
+window.addEventListener("dragenter", e => { if (e.dataTransfer && [...e.dataTransfer.types].includes("Files")) { dragDepth++; if (!$("#mAdd").classList.contains("on")) $("#dragcover").style.display = "flex"; else addDrop.classList.add("on"); } });
+window.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; $("#dragcover").style.display = "none"; addDrop.classList.remove("on"); } });
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", async e => {
+  e.preventDefault(); dragDepth = 0; $("#dragcover").style.display = "none"; addDrop.classList.remove("on");
+  const files = [...(e.dataTransfer.files || [])];
+  if (files.length) {
+    const list = await loadTorrentFiles(files); if (!list.length) return;
+    if ($("#mAdd").classList.contains("on")) { addTorrents = addTorrents.concat(list); $("#addFiles").textContent = "已选择：" + addTorrents.map(t => t.name).join("，"); }
+    else await submitAdd([], list, cfg.downloadDir);
+    return;
+  }
+  const text = e.dataTransfer.getData("text/plain"); if (text) openAdd(text.trim());
+});
+document.addEventListener("paste", e => {
+  if (document.querySelector(".mask.on") || /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  const text = (e.clipboardData.getData("text") || "").trim();
+  if (/^(https?|ftp|magnet):/im.test(text)) openAdd(text);
+});
+
+// ---- 选择种子文件：服务端分页，只渲染当前页；全程可 Esc/✕ 关闭，可跳过选择 ----
+// 选择模型：base（all/none/keep）+ except（与 base 相反的条目 i → {s 大小, d 默认是否选中}）
+let fd = null, fdSeq = 0;
+function resetFilesDlg() { if (fd && fd.timer) clearTimeout(fd.timer); fd = null; dlgFilesGid = null; const ok = $("#filesOk"); if (ok) ok.textContent = "开始下载"; const skip = $("#filesSkip"); if (skip) skip.style.display = ""; }
+function fdDefault(f) { return fd.base === "all" ? true : fd.base === "none" ? false : !!f.sel; }
+function fdChecked(f) { return fdDefault(f) !== fd.except.has(f.i); }
+function openFiles(gid, opts) {
+  resetFilesDlg();
+  const t = tasks.find(x => x.gid === gid);
+  const reselect = !!(opts && opts.reselect);
+  fd = {gid, seq: ++fdSeq, base: "keep", except: new Map(), offset: 0, q: "", items: [], total: 0, totalBytes: 0, selCount0: 0, selBytes0: 0, matched: 0, ready: false, started: Date.now(), timer: null, reselect};
+  dlgFilesGid = gid;
+  $("#filesTitle").textContent = (reselect ? "重新选择文件 — " : "选择要下载的文件 — ") + (t ? taskName(t) : gid);
+  $("#filesQ").value = ""; $("#filesNav").innerHTML = ""; $("#filesSum").textContent = ""; $("#filesAll").checked = true;
+  $("#filesList").innerHTML = '<div class="floading">正在读取文件列表…</div>';
+  $("#filesOk").disabled = true;
+  $("#filesOk").textContent = reselect ? "应用选择" : "开始下载";
+  const skip = $("#filesSkip"); if (skip) skip.style.display = reselect ? "none" : "";
+  openDlg("#mFiles");
+  loadFilesPage(reselect); // 重选时 refresh 以拿到当前选择
+}
+async function loadFilesPage(refresh) {
+  if (!fd) return;
+  const my = fd.seq;
+  let j;
+  try { j = await api("/api/files", {gid: fd.gid, offset: fd.offset, limit: FILES_PAGE, q: fd.q, refresh: !!refresh}, 8000); }
+  catch (e) {
+    if (!fd || fd.seq !== my) return;
+    $("#filesList").innerHTML = '<div class="floading err">读取文件列表失败：' + esc(e.message) + '<br><br><button type="button" id="filesRetry">重试</button>　也可以直接点「跳过选择，全部下载」</div>';
+    const rb = $("#filesRetry"); if (rb) rb.onclick = () => { $("#filesList").innerHTML = '<div class="floading">正在读取文件列表…</div>'; loadFilesPage(true); };
+    return;
+  }
+  if (!fd || fd.seq !== my) return; // 对话框已关闭或换了任务
+  if (j.pending) {
+    const sec = Math.round((Date.now() - fd.started) / 1000);
+    $("#filesList").innerHTML = '<div class="floading">正在读取文件列表…' + (sec >= 3 ? "（" + sec + " 秒，下载引擎较忙）" : "") + '<br><span class="hint">不想等可以点「跳过选择，全部下载」或「稍后再选」</span></div>';
+    fd.timer = setTimeout(loadFilesPage, 800);
+    return;
+  }
+  if (!fd.ready) { fd.ready = true; fd.selCount0 = j.selCount; fd.selBytes0 = j.selBytes; fd.base = j.selCount === j.total ? "all" : "keep"; }
+  fd.total = j.total; fd.totalBytes = j.totalBytes; fd.items = j.items || []; fd.matched = j.matched; fd.offset = j.offset;
+  renderFilesPage();
+}
+function renderFilesPage() {
+  if (!fd) return;
+  const pages = Math.max(1, Math.ceil(fd.matched / FILES_PAGE)), page = Math.floor(fd.offset / FILES_PAGE);
+  $("#filesNav").innerHTML = (fd.matched > FILES_PAGE || fd.q) ? '<div class="row" style="margin:0 0 8px"><span class="hint">' + (fd.q ? "匹配 " + fd.matched + " / " : "共 ") + fd.total + ' 个文件</span><span class="grow"></span>' +
+    '<button type="button" id="filesPrev"' + (page <= 0 ? " disabled" : "") + '>上一页</button><span class="hint"> ' + (page + 1) + '/' + pages + ' </span>' +
+    '<button type="button" id="filesNext"' + (page >= pages - 1 ? " disabled" : "") + '>下一页</button></div>' : "";
+  $("#filesList").innerHTML = fd.items.length ? fd.items.map(f =>
+    '<label><input type="checkbox" data-i="' + f.i + '"' + (fdChecked(f) ? " checked" : "") + '><span class="p" title="' + esc(f.p) + '">' + esc(f.p) + '</span><span class="s">' + fmtSize(f.s) + '</span></label>').join("")
+    : '<div class="floading">没有匹配的文件</div>';
+  const prev = $("#filesPrev"), next = $("#filesNext");
+  if (prev) prev.onclick = () => { fd.offset = Math.max(0, fd.offset - FILES_PAGE); loadFilesPage(); };
+  if (next) next.onclick = () => { fd.offset += FILES_PAGE; loadFilesPage(); };
+  $("#filesOk").disabled = false;
+  updFilesSum();
+}
+function fdCounts() {
+  let n = fd.base === "all" ? fd.total : fd.base === "none" ? 0 : fd.selCount0;
+  let sz = fd.base === "all" ? fd.totalBytes : fd.base === "none" ? 0 : fd.selBytes0;
+  for (const v of fd.except.values()) { if (v.d) { n--; sz -= v.s; } else { n++; sz += v.s; } }
+  return [n, sz];
+}
+function updFilesSum() {
+  if (!fd || !fd.ready) return;
+  const [n, sz] = fdCounts();
+  $("#filesSum").textContent = "已选 " + n + "/" + fd.total + " 个文件，共 " + fmtSize(sz);
+  $("#filesAll").checked = n === fd.total && fd.total > 0;
+  $("#filesAll").indeterminate = n > 0 && n < fd.total;
+}
+$("#filesList").addEventListener("change", e => {
+  const b = e.target; if (!fd || !b || !b.dataset || b.dataset.i === undefined) return;
+  const i = +b.dataset.i, f = fd.items.find(x => x.i === i); if (!f) return;
+  const d = fdDefault(f);
+  if (b.checked === d) fd.except.delete(i); else fd.except.set(i, {s: +f.s || 0, d});
+  updFilesSum();
+});
+$("#filesAll").onchange = e => {
+  if (!fd || !fd.ready) return;
+  fd.base = e.target.checked ? "all" : "none"; fd.except.clear();
+  document.querySelectorAll("#filesList input[data-i]").forEach(b => b.checked = e.target.checked);
+  updFilesSum();
+};
+let filesQTimer = null;
+$("#filesQ").addEventListener("input", () => { clearTimeout(filesQTimer); filesQTimer = setTimeout(() => { if (!fd) return; fd.q = $("#filesQ").value.trim(); fd.offset = 0; loadFilesPage(); }, 250); });
+async function startBT(body, okMsg) {
+  try {
+    await api("/api/startbt", body, 8000);
+    closeDlg($("#mFiles")); toast(okMsg);
+  } catch (e) { toast("开始下载失败：" + e.message, 5000); }
+  poll();
+}
+$("#filesOk").onclick = async () => {
+  if (!fd || !fd.ready) return toast("文件列表还没读完，可以先点「跳过选择，全部下载」");
+  const [n] = fdCounts(); if (!n) return toast("至少选择一个文件");
+  const body = {gid: fd.gid, base: fd.base, except: [...fd.except.keys()]};
+  if (fd.reselect) {
+    try { await api("/api/reselect", body, 8000); closeDlg($("#mFiles")); toast("已更新文件选择（" + n + " 个）"); }
+    catch (e) { toast("更新失败：" + e.message, 5000); }
+    poll(); return;
+  }
+  startBT(body, "开始下载 " + n + " 个文件");
+};
+$("#filesSkip").onclick = () => { if (fd) startBT({gid: fd.gid, skip: true}, "开始下载全部文件"); };
+
+async function loadCfg() {
+  const j = await api("/api/config");
+  cfg = j.config; canPick = j.canPickDir;
+  $("#fDir").textContent = "下载目录：" + cfg.downloadDir;
+  return j;
+}
+async function refreshAssoc() {
+  try {
+    const j = await api("/api/assoc");
+    if (!j.supported) { $("#sAssocSt").textContent = "当前系统不支持"; return; }
+    $("#sAssocSt").textContent = (j.magnet ? "magnet 已关联" : "magnet 未关联") + " · " + (j.torrent ? ".torrent 已关联" : ".torrent 未关联");
+  } catch (e) { $("#sAssocSt").textContent = e.message; }
+}
+$("#btnSet").onclick = async () => {
+  const j = await loadCfg();
+  $("#sDir").value = cfg.downloadDir; $("#sConc").value = cfg.maxConcurrent; $("#sDl").value = cfg.maxDownloadKB; $("#sUl").value = cfg.maxUploadKB;
+  $("#sSplit").value = cfg.splitPerTask; $("#sSeed").value = cfg.seedMinutes; $("#sPick").checked = cfg.selectBTFiles; $("#sTray").checked = cfg.closeToTray !== false; $("#sAlloc").value = cfg.fileAllocation || "auto"; $("#sEngine").value = cfg.defaultEngine || "auto"; $("#sTrk").value = cfg.extraTrackers || "";
+  $("#sDirPick").style.display = canPick ? "" : "none";
+  const engSt = (j.btReady ? "BitTorrent 就绪" : "BitTorrent 未启动") + " · " + (j.ytdlpReady ? "yt-dlp 就绪" : "yt-dlp 首次用时自动下载");
+  $("#sInfo").textContent = "已内置 " + j.trackerCount + " 个 Tracker · " + engSt + " · 配置：" + j.dataDir;
+  refreshAssoc();
+  openDlg("#mSet");
+};
+$("#sDirPick").onclick = async () => { const p = await pickDir(); if (p) $("#sDir").value = p; };
+$("#sOk").onclick = async () => {
+  const c = {downloadDir: $("#sDir").value.trim(), maxConcurrent: +$("#sConc").value || 3, maxDownloadKB: +$("#sDl").value || 0, maxUploadKB: +$("#sUl").value || 0,
+    splitPerTask: +$("#sSplit").value || 16, seedMinutes: +$("#sSeed").value || 0, selectBTFiles: $("#sPick").checked, closeToTray: $("#sTray").checked, fileAllocation: $("#sAlloc").value, defaultEngine: $("#sEngine").value, extraTrackers: $("#sTrk").value};
+  try { await api("/api/config", c); await loadCfg(); closeDlg($("#mSet")); toast("设置已保存"); } catch (e) { toast(e.message, 5000); }
+};
+$("#sAssocReg").onclick = async () => { try { await api("/api/assoc", {action: "register"}); toast("已注册关联"); refreshAssoc(); } catch (e) { toast(e.message); } };
+$("#sAssocUnreg").onclick = async () => { try { await api("/api/assoc", {action: "unregister"}); toast("已取消关联"); refreshAssoc(); } catch (e) { toast(e.message); } };
+
+// 剪贴板 / 协议关联收件箱
+async function pollInbox() {
+  try {
+    const j = await api("/api/inbox");
+    const items = j.items || [];
+    if (!items.length) return;
+    const urls = [], torrents = [];
+    for (const it of items) {
+      if (it.kind === "url") {
+        if (it.source === "clipboard") {
+          if (ignoredClip.has(it.value)) continue;
+        }
+        urls.push(it);
+      } else if (it.kind === "torrentPath") {
+        torrents.push(it);
+      }
+    }
+    // 协议关联 / 命令行：直接添加
+    const autoURLs = urls.filter(u => u.source !== "clipboard").map(u => u.value);
+    const clipURLs = [...new Set(urls.filter(u => u.source === "clipboard").map(u => u.value))];
+    if (autoURLs.length) await submitAdd(autoURLs, [], cfg ? cfg.downloadDir : "");
+    for (const t of torrents) {
+      try {
+        const f = await api("/api/readtorrent", {path: t.value}, 30000);
+        await submitAdd([], [{name: f.name, b64: f.b64}], cfg ? cfg.downloadDir : "");
+      } catch (e) { toast("打开种子失败：" + e.message); }
+    }
+    if (clipURLs.length && !clipBusy && !document.querySelector(".mask.on")) {
+      clipBusy = true;
+      $("#clipUrls").value = clipURLs.join("\n");
+      openDlg("#mClip");
+    } else if (clipURLs.length && (clipBusy || document.querySelector(".mask.on"))) {
+      // 忙时先塞回 inbox？已 take 走了；暂存到窗口字段
+      if (!$("#mClip").classList.contains("on")) {
+        // 合并到已有待确认
+      }
+    }
+  } catch (e) {}
+}
+$("#clipYes").onclick = async () => {
+  const lines = $("#clipUrls").value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  closeDlg($("#mClip"));
+  clipBusy = false;
+  lines.forEach(u => ignoredClip.add(u)); // 防止同一内容反复弹
+  await submitAdd(lines, [], cfg ? cfg.downloadDir : "");
+};
+$("#clipNo").onclick = () => {
+  const lines = $("#clipUrls").value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  lines.forEach(u => ignoredClip.add(u));
+  closeDlg($("#mClip"));
+  clipBusy = false;
+};
+
+
+const LOVE_QUOTES = [
+  ["愿我如星君如月", "终年无绝期", "李白《拟古》"],
+  ["在天愿作比翼鸟", "在地愿为连理枝", "白居易《长恨歌》"],
+  ["两情若是久长时", "又岂在朝朝暮暮", "秦观《鹊桥仙》"],
+  ["曾经沧海难为水", "除却巫山不是云", "元稹《离思》"],
+  ["身无彩凤双飞翼", "心有灵犀一点通", "李商隐《无题》"],
+  ["春蚕到死丝方尽", "蜡炬成灰泪始干", "李商隐《无题》"],
+  ["愿得一心人", "白头不相离", "卓文君《白头吟》"],
+  ["执子之手", "与子偕老", "《诗经·击鼓》"],
+  ["死生契阔", "与子成说", "《诗经·击鼓》"],
+  ["窈窕淑女", "君子好逑", "《诗经·关雎》"],
+  ["我住长江头", "君住长江尾", "李之仪《卜算子》"],
+  ["只愿君心似我心", "定不负相思意", "李之仪《卜算子》"],
+  ["此情无计可消除", "才下眉头，却上心头", "李清照《一剪梅》"],
+  ["问世间，情是何物", "直教生死相许", "元好问《摸鱼儿》"],
+  ["山有木兮木有枝", "心悦君兮君不知", "《越人歌》"],
+  ["玲珑骰子安红豆", "入骨相思知不知", "温庭筠《南歌子》"],
+  ["愿君多采撷", "此物最相思", "王维《相思》"],
+  ["换我心，为你心", "始知相忆深", "顾敻《诉衷情》"],
+  ["落花人独立", "微雨燕双飞", "晏几道《临江仙》"],
+  ["众里寻他千百度", "蓦然回首，那人却在灯火阑珊处", "辛弃疾《青玉案》"],
+  ["愿为西南风", "长逝入君怀", "曹植《七哀》"],
+  ["人生若只如初见", "何事秋风悲画扇", "纳兰性德《木兰花》"],
+  ["平生不会相思", "才会相思，便害相思", "徐再思《折桂令》"],
+  ["Love looks not with the eyes, but with the mind", "", "Shakespeare · A Midsummer Night's Dream"],
+  ["Doubt thou the stars are fire", "Doubt that the sun doth move", "Shakespeare · Hamlet"],
+  ["Love is not love which alters when it alteration finds", "", "Shakespeare · Sonnet 116"],
+  ["Shall I compare thee to a summer's day?", "", "Shakespeare · Sonnet 18"],
+  ["You have bewitched me, body and soul", "", "Jane Austen · Pride and Prejudice"],
+  ["I am half agony, half hope", "", "Jane Austen · Persuasion"],
+  ["There is no charm equal to tenderness of heart", "", "Jane Austen · Emma"],
+  ["Whatever our souls are made of, his and mine are the same", "", "Emily Brontë · Wuthering Heights"],
+  ["How do I love thee? Let me count the ways", "", "Elizabeth Barrett Browning"],
+  ["Grow old along with me! The best is yet to be", "", "Robert Browning"],
+  ["I love thee to the depth and breadth and height my soul can reach", "", "E. B. Browning"],
+  ["If I had a flower for every time I thought of you", "I could walk in my garden forever", "Alfred Tennyson"],
+];
+(function showLoveQuote() {
+  const el = $("#loveq");
+  if (!el) return;
+  const q = LOVE_QUOTES[Math.floor(Math.random() * LOVE_QUOTES.length)];
+  const sep = /[\u4e00-\u9fff]/.test(q[0]) ? "，" : " — "; const line = q[0] + (q[1] ? sep + q[1] : "");
+  el.innerHTML = esc(line) + "<b>·</b><span style=\"opacity:.85\">" + esc(q[2]) + "</span>";
+  el.title = line + " — " + q[2];
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add("on")));
+})();
+
+
+// ---- 右键菜单 / 任务详情 ----
+const ctx = $("#ctxMenu");
+function hideCtx() { if (ctx) ctx.style.display = "none"; }
+function showCtxMenu(x, y, t) {
+  if (!ctx || !t) return;
+  const isBT = !!(t.bittorrent);
+  const canPick = isBT && t.bittorrent.info;
+  const items = [];
+  if (t.status === "paused") items.push(["unpause", needsPick(t) ? "开始" : "继续"]);
+  if (t.status === "active" || t.status === "waiting") items.push(["pause", "暂停"]);
+  items.push(["stop", "停止"]);
+  if (t.status === "error" || t.status === "removed") items.push(["retry", "重试"]);
+  items.push(["delete", "删除", "danger"]);
+  items.push(null);
+  items.push(["open", "打开文件夹"]);
+  items.push(["copy", "复制链接"]);
+  if (canPick) items.push(["pick", "选择文件"]);
+  items.push(null);
+  items.push(["details", "任务详情"]);
+  ctx.innerHTML = items.map(it => {
+    if (!it) return "<hr>";
+    return '<button type="button" data-c="' + it[0] + '"' + (it[2] ? ' class="' + it[2] + '"' : '') + '>' + it[1] + '</button>';
+  }).join("");
+  ctx.style.display = "block";
+  const w = ctx.offsetWidth, h = ctx.offsetHeight;
+  ctx.style.left = Math.min(x, window.innerWidth - w - 8) + "px";
+  ctx.style.top = Math.min(y, window.innerHeight - h - 8) + "px";
+  ctx._gid = t.gid;
+}
+async function ctxAction(act, gid) {
+  const t = tasks.find(x => x.gid === gid); if (!t) return;
+  try {
+    if (act === "pause") await taskAction("pause", [gid]);
+    else if (act === "unpause") await taskAction("unpause", [gid]);
+    else if (act === "stop") await taskAction("delete", [gid], {deleteFiles: false}); // 停止=移除任务保留文件
+    else if (act === "retry") await retryTasks([gid]);
+    else if (act === "delete") askDelete([gid]);
+    else if (act === "open") await api("/api/open", {path: filePath(t)});
+    else if (act === "copy") {
+      let link = "";
+      try {
+        const j = await api("/api/details", {gid, tab: "overview"}, 6000);
+        link = (j.overview && (j.overview.link || j.overview.infoHash)) || "";
+        if (link && !/^magnet:|^https?:/i.test(link) && j.overview.infoHash) link = "magnet:?xt=urn:btih:" + j.overview.infoHash;
+      } catch (e) {}
+      if (!link && t.infoHash) link = "magnet:?xt=urn:btih:" + t.infoHash;
+      if (!link) return toast("没有可复制的链接");
+      try { await navigator.clipboard.writeText(link); toast("已复制链接"); }
+      catch (e) { const ta = document.createElement("textarea"); ta.value = link; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); toast("已复制链接"); }
+    }
+    else if (act === "pick") openFiles(gid, {reselect: !needsPick(t)});
+    else if (act === "details") openDetails(gid);
+  } catch (e) { toast("操作失败：" + e.message); }
+}
+ctx && ctx.addEventListener("click", e => {
+  const b = e.target.closest("button[data-c]"); if (!b) return;
+  const gid = ctx._gid; hideCtx(); ctxAction(b.dataset.c, gid);
+});
+document.addEventListener("click", e => { if (ctx && !ctx.contains(e.target)) hideCtx(); });
+document.addEventListener("contextmenu", e => {
+  // 始终压制 WebView2 原生菜单，避免盖住我们的菜单
+  if (/INPUT|TEXTAREA/.test((e.target.tagName || ""))) return;
+  e.preventDefault();
+  const tr = e.target.closest("tr[data-gid]");
+  if (!tr) { hideCtx(); return; }
+  const t = tasks.find(x => x.gid === tr.dataset.gid);
+  if (t) showCtxMenu(e.clientX, e.clientY, t);
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+    const tr = document.querySelector("tr[data-gid].sel") || document.querySelector("tr[data-gid]");
+    if (!tr) return;
+    e.preventDefault();
+    const t = tasks.find(x => x.gid === tr.dataset.gid);
+    const r = tr.getBoundingClientRect();
+    if (t) showCtxMenu(r.left + 40, r.bottom - 4, t);
+  }
+});
+
+let det = {gid: "", tab: "overview", timer: null, seq: 0, inflight: false};
+function openDetails(gid) {
+  const t = tasks.find(x => x.gid === gid);
+  det = {gid, tab: "overview", timer: null, seq: det.seq + 1, inflight: false};
+  $("#detTitle").textContent = "任务详情 — " + (t ? taskName(t) : gid);
+  document.querySelectorAll("#detTabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === "overview"));
+  $("#detBody").innerHTML = '<div class="floading">加载中…</div>';
+  openDlg("#mDet");
+  refreshDetails();
+  det.timer = setInterval(() => {
+    if (!$("#mDet").classList.contains("on")) return;
+    if (det.tab === "files" && document.activeElement && document.activeElement.id === "detFilesQ") return;
+    refreshDetails();
+  }, 2000);
+}
+async function refreshDetails() {
+  if (!det.gid) return;
+  // 允许切换页签时发起新请求；用 seq 丢弃过期响应，避免概览覆盖文件页。
+  const my = ++det.seq;
+  const tab = det.tab;
+  try {
+    const j = await api("/api/details", {gid: det.gid, tab: tab}, 7000);
+    if (my !== det.seq) return;
+    if (!$("#mDet").classList.contains("on")) return;
+    renderDetails(j);
+  } catch (e) {
+    if (my !== det.seq) return;
+    if ($("#mDet").classList.contains("on")) $("#detBody").innerHTML = '<div class="floading err">' + esc(e.message) + '</div>';
+  }
+}
+function renderDetails(j) {
+  const warn = j.warning ? '<div class="hint" style="color:var(--warn);margin-bottom:8px">' + esc(j.warning) + '</div>' : '';
+  if (j.tab === "overview") {
+    const o = j.overview || {};
+    const pct = (+o.totalLength > 0) ? ((+o.completedLength / +o.totalLength) * 100).toFixed(1) + "%" : "--";
+    const eta = (+o.downloadSpeed > 0 && +o.totalLength > +o.completedLength) ? fmtEta((+o.totalLength - +o.completedLength) / +o.downloadSpeed) : "--";
+    const created = o.createdAt ? new Date(+o.createdAt).toLocaleString() : "--";
+    $("#detBody").innerHTML = warn + '<div class="kv">' +
+      '<b>名称</b><span>' + esc(o.name || taskName(tasks.find(t => t.gid === j.gid) || {}) || j.gid) + '</span>' +
+      '<b>引擎</b><span>' + esc(o.engineLabel || o.engine || "") + '</span>' +
+      '<b>状态</b><span>' + esc(o.status || "") + '</span>' +
+      '<b>大小</b><span>' + fmtSize(o.totalLength) + '（已完成 ' + fmtSize(o.completedLength) + '，' + pct + '）</span>' +
+      '<b>速度</b><span>↓ ' + fmtSize(o.downloadSpeed) + '/s　↑ ' + fmtSize(o.uploadSpeed) + '/s　ETA ' + eta + '</span>' +
+      '<b>连接</b><span>连接 ' + (o.connections || 0) + '　种子 ' + (o.numSeeders || 0) + (o.btListenPort ? '　监听 ' + o.btListenPort : '') + '</span>' +
+      '<b>保存路径</b><span style="user-select:text">' + esc(o.dir || "") + '</span>' +
+      '<b>链接/Hash</b><span style="user-select:text;word-break:break-all">' + esc(o.link || o.infoHash || "") + '</span>' +
+      '<b>创建时间</b><span>' + esc(created) + '</span>' +
+      (o.errorMessage ? '<b>说明</b><span style="color:var(--warn)">' + esc(o.errorMessage) + '</span>' : '') +
+      '</div>';
+    return;
+  }
+  if (j.tab === "files") {
+    const files = j.files || [];
+    if (!files.length) { $("#detBody").innerHTML = warn + '<div class="floading">无文件信息</div>'; return; }
+    const q = (det.q || "").toLowerCase();
+    const shown = q ? files.filter(f => String(f.p || "").toLowerCase().includes(q)) : files;
+    $("#detBody").innerHTML = warn + '<div class="row" style="margin:0 0 8px"><input type="text" id="detFilesQ" placeholder="搜索文件" value="' + esc(det.q || "") + '" style="flex:1"><span class="hint">' + shown.length + '/' + files.length + '</span></div>' +
+      '<div class="flist">' + shown.slice(0, 300).map(f => {
+        const pct = (+f.s > 0) ? Math.min(100, (+f.done / +f.s) * 100).toFixed(0) : 0;
+        return '<label><span class="p" title="' + esc(f.p) + '">' + (f.sel ? "✓ " : "· ") + esc(f.p) + '</span><span class="s">' + fmtSize(f.done) + '/' + fmtSize(f.s) + ' (' + pct + '%)</span></label>';
+      }).join("") + (shown.length > 300 ? '<div class="hint" style="padding:8px">仅显示前 300 项，请用搜索过滤</div>' : '') + '</div>';
+    const inp = $("#detFilesQ");
+    if (inp) inp.oninput = () => { det.q = inp.value.trim(); renderDetails(j); };
+    return;
+  }
+  if (j.tab === "trackers") {
+    const tr = j.trackers || [];
+    if (!tr.length) { $("#detBody").innerHTML = warn + '<div class="floading">无 Tracker 信息</div>'; return; }
+    $("#detBody").innerHTML = warn + '<div class="flist">' + tr.map(t => '<label><span class="p" style="user-select:text" title="' + esc(t.url) + '">' + esc(t.url) + '</span><span class="s">' + esc(t.status || "") + '</span></label>').join("") + '</div>';
+    return;
+  }
+  if (j.tab === "peers") {
+    const peers = j.peers || [];
+    if (!peers.length) { $("#detBody").innerHTML = warn + '<div class="floading">暂无节点/来源（引擎忙或尚未连接）</div>'; return; }
+    $("#detBody").innerHTML = warn + '<table><thead><tr><th>地址</th><th>客户端</th><th>↓</th><th>↑</th><th>进度</th></tr></thead><tbody>' +
+      peers.slice(0, 200).map(p => '<tr><td style="user-select:text">' + esc(p.addr || "") + '</td><td>' + esc(p.client || p.kind || "") + '</td><td>' + fmtSize(p.dl) + '/s</td><td>' + fmtSize(p.ul) + '/s</td><td>' + (p.progress ? (+p.progress).toFixed(1) + "%" : "") + '</td></tr>').join("") +
+      '</tbody></table>';
+  }
+}
+$("#detTabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-tab]"); if (!b) return;
+  det.tab = b.dataset.tab; det.q = "";
+  document.querySelectorAll("#detTabs button").forEach(x => x.classList.toggle("on", x === b));
+  $("#detBody").innerHTML = '<div class="floading">加载中…</div>';
+  refreshDetails();
+});
+// 关闭详情时停刷新
+const _closeDlg = window.closeDlg || null;
+document.querySelectorAll("#mDet [data-close]").forEach(b => b.addEventListener("click", () => {
+  if (det.timer) { clearInterval(det.timer); det.timer = null; }
+}));
+
+// 心跳：附带主线程卡顿时长（事件循环延迟）与窗口是否隐藏，后端看门狗据此记日志。
+let lagMax = 0, lagLast = performance.now();
+setInterval(() => { const now = performance.now(); lagMax = Math.max(lagMax, now - lagLast - 250); lagLast = now; }, 250);
+function heartbeat() { const lag = Math.round(document.hidden ? 0 : lagMax); lagMax = 0; api("/api/ping", {lagMs: lag, hidden: document.hidden}, 4000).catch(() => {}); }
+setInterval(heartbeat, 2000); heartbeat();
+try { new PerformanceObserver(l => l.getEntries().forEach(e => { if (e.duration > 1500) uiLog("longtask", "界面长任务 " + Math.round(e.duration) + " ms", "", e.name); })).observe({entryTypes: ["longtask"]}); } catch (e) {}
+loadCfg().then(() => { poll(); pollInbox(); }).catch(e => $("#fConn").textContent = "连接失败：" + e.message);
+setInterval(poll, 1000);
+let inboxBusy = false;
+setInterval(async () => { if (inboxBusy) return; inboxBusy = true; try { await pollInbox(); } finally { inboxBusy = false; } }, 1200);
+</script>
+</body>
+</html>

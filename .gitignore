@@ -1,0 +1,6 @@
+﻿build/
+dist/
+screenshots/
+*.exe~
+*.log
+/hornetdl-linux

@@ -1,0 +1,134 @@
+Hornet 下载器 v1.5.1（Windows 64 位 · 多引擎便携版）
+================================================
+
+没有广告、没有数据上报的下载工具。内嵌多个下载引擎，解压后只需一个
+HornetDownloader.exe 即可运行（yt-dlp 首次使用视频站链接时再下载旁路）。
+
+支持：HTTP / HTTPS / FTP、磁力链接（magnet:）、.torrent 种子、
+      常见视频站点页面（B 站 / YouTube 等，经 yt-dlp）。
+暂不支持：网盘（百度等）、迅雷专用链接（thunder://）、ed2k。
+
+
+一、怎么用
+----------
+1. 解压后双击 HornetDownloader.exe。
+   第一次运行会把内嵌的 aria2c 释放到 %APPDATA%\HornetDownloader\bin\，
+   并尝试注册 magnet: 与 .torrent 的打开方式。
+2. Windows 防火墙若询问是否允许联网，请选「允许」（否则 BT/磁力会很慢）。
+3. 「＋ 新建任务」粘贴链接（可多行）；也可 Ctrl+V，或把 .torrent 拖进窗口。
+4. 新建任务时可选择下载引擎：自动 / aria2 / BitTorrent / yt-dlp。
+   「自动」会按链接类型给出推荐（界面旁有简短说明）。
+5. 复制了 http(s)/ftp/magnet 链接时，程序会弹出「是否添加下载」确认框。
+6. 浏览器里点击磁力链接，或用「打开方式」选择本程序打开 .torrent，
+   会调起本程序并加入任务（单实例：已打开时会转给现有窗口）。
+7. 默认关闭窗口会最小化到系统托盘；托盘图标右键可「显示主窗口 / 退出」。
+
+
+二、多引擎说明（v1.4）
+--------------------
+| 引擎        | 适合                         | 实现方式                          |
+|-------------|------------------------------|-----------------------------------|
+| aria2       | HTTP/FTP 直链、备用磁力/种子 | 内嵌官方 aria2c 1.37.0            |
+| BitTorrent  | 磁力、.torrent（推荐）       | 纯 Go：anacrolix/torrent（同角色于 libtorrent，便于单文件便携，无 CGO/DLL） |
+| yt-dlp      | 视频站点页面链接             | 旁路 yt-dlp.exe（首次用时尝试自动下载到 bin\） |
+
+设置里可改「默认引擎」：自动，或强制某一个。
+任务列表名称旁会显示实际使用的引擎标签。
+
+引擎路由（v1.5 重要）：
+- 新建对话框选「自动」时，始终按链接推荐（磁力/种子→BitTorrent，视频站→yt-dlp，其它→aria2），
+  不会被设置里旧的「默认 aria2」覆盖。
+- 剪贴板 / 关联 / 命令行 / 拖放 / 种子按钮：走设置「默认引擎」；若是「自动」则跟推荐。
+- 手动指定引擎失败时不再偷偷换成 aria2；同一磁力已在列表时返回已有任务，不会再添加一份 aria2。
+- 仅「自动/默认」且 BitTorrent 因其它原因失败时，才回退 aria2，并在提示里写明原因。
+
+界面修正（v1.5.1）：
+- 任务详情切换页签不再被过期响应盖住；Esc 关闭右键菜单；yt-dlp 缺失提示更清楚。
+- 操作列不再出现两个「暂停」；下载中只显示一个「暂停」，已暂停显示「继续」，「停止/删除」在右键菜单。
+- 状态列改为短文案（如「下载中」「连接中 10/40」）+ 第二行 peer 摘要，完整信息在鼠标悬停与任务详情里。
+
+任务操作（v1.5）：
+
+- 右键任务行（或点 ⋯ / Shift+F10）：暂停/继续、停止（删任务留文件）、重试、删除、打开文件夹、
+  复制链接、选择文件（BT）、任务详情。
+- 「任务详情」含概览 / 文件 / Tracker / 来源·节点，后台刷新，不卡界面。
+- 下载中 / 暂停 / 已完成均可重新选择多文件种子中的文件（aria2 与 BitTorrent）。
+
+BitTorrent 速度（v1.5）：
+- 有 peer 却 0 速度时自动 kick：重新 AllowDataDownload、恢复文件优先级。
+- 存储改用 part files + 内存 piece completion，减轻「迅雷下载」等目录权限/长路径触发的停下。
+
+
+三、多线程与断点续传
+--------------------
+- HTTP/HTTPS/FTP（aria2）默认多连接分段：单任务连接数默认 16（设置可改）。
+- continue=true + 会话文件：暂停、退出后可续传。
+- BitTorrent 引擎按分块落盘，重启后从会话恢复未完成任务。
+- yt-dlp 依赖自身对未完成文件的续传能力。
+
+
+四、国内网络与磁盘
+------------------
+- 内置偏国内可达的公共 Tracker（CnTrackersList / XIU2 等思路）。
+- BitTorrent / aria2：DHT / PEX；监听优先 6881–6999；开启 UPnP/NAT-PMP。
+- BitTorrent 引擎会定期补加公共 Tracker，状态栏显示「候选/握手/已连」节点数。
+- 请在防火墙放行本程序（入站），否则磁力常显示「寻找节点中」且速度为 0。
+- 「磁盘空间分配」默认「自动」：在 Windows 上用 prealloc，避免 NTFS
+  随机写入补零时把 aria2（含 RPC）卡住、界面显示「响应超时」。
+  可在设置里改为 none / trunc / 强制 prealloc。
+
+
+五、界面卡顿防护（请保留）
+--------------------------
+大种子时：任务列表后台缓存、暂停进队列立刻返回、文件列表服务端分页、
+可关闭的选文件对话框、「跳过选择全部下载」、aria2 健康看门狗。
+请勿用旧版覆盖。
+
+
+六、主要功能
+------------
+- 任务列表、暂停/继续/删除（可删文件）、批量操作、打开目录
+- 失败任务「重新开始」
+- 引擎选择与自动推荐、任务引擎标签
+- 设置：下载目录、同时任务数、限速、连接数、做种、选文件、
+  磁盘分配、默认引擎、关闭到托盘、Tracker、浏览器关联
+- 剪贴板监视、magnet/.torrent 系统关联
+- 无广告；本地 UI 带随机令牌；引擎 RPC 仅本机
+
+
+七、文件位置
+------------
+- 下载文件：设置中的目录（默认 用户\Downloads）
+- 配置与会话：%APPDATA%\HornetDownloader
+  （config.json、aria2.session、bt-session.json、bin\aria2c.exe、
+   bin\yt-dlp.exe、app.log、aria2.log）
+  彻底重置：退出后删除该文件夹。
+
+
+八、替换旧版
+------------
+1. 任务管理器结束 HornetDownloader.exe 与 aria2c.exe（若有）。
+2. 用新版 HornetDownloader.exe 覆盖。
+3. 重新打开即可。
+
+
+九、常见问题
+------------
+- 白屏：默认 WebView2；没有则自动用 Edge 应用窗口，或加参数 --browser
+- 磁力一直「获取元数据」：资源冷门或防火墙未放行
+- yt-dlp 提示无法下载：检查网络，或手动把 yt-dlp.exe 放到
+  %APPDATA%\HornetDownloader\bin\
+- 杀毒误报：内嵌 aria2c 为官方开源构建，可加信任
+- 取消关联：设置里点「取消关联」，或 HornetDownloader.exe --unregister-assoc
+
+
+十、开源组件
+------------
+aria2 1.37.0          https://github.com/aria2/aria2          （GPL-2.0）
+anacrolix/torrent     https://github.com/anacrolix/torrent    （MPL-2.0）
+yt-dlp（旁路，可选）  https://github.com/yt-dlp/yt-dlp        （Unlicense）
+
+界面字体（已子集化嵌入，SIL OFL 1.1）：
+- Noto Sans SC — 界面
+- 霞鹜文楷 LXGW WenKai — 顶部情诗行
+详见 web/fonts/LICENSES.txt。
