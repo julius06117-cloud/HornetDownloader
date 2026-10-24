@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +13,9 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
+
+	alog "github.com/anacrolix/log"
 )
 
 // fakeAria2 记录收到的 RPC 方法；addUri 返回固定 gid，其它返回 "OK"。
@@ -167,4 +173,33 @@ func TestHTMLFailedLegacyTaskMigratesToParked(t *testing.T) {
 	if fa.called("aria2.removeDownloadResult") == 0 {
 		t.Fatal("legacy failed task not removed from aria2")
 	}
+}
+
+type failWriter struct{}
+
+func (failWriter) Write(p []byte) (int, error) { return 0, errors.New("The handle is invalid.") }
+
+// v1.5.4：GUI 进程没有有效 stderr 时，日志写入错误不能传给 BT 引擎（anacrolix/log 会 panic 退出）。
+func TestLogWritesNeverFailOnBadStderr(t *testing.T) {
+	f, err := os.Create(filepath.Join(t.TempDir(), "app.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	w := logTee{file: &capWriter{f: f, max: 1 << 20}, best: failWriter{}}
+	if n, err := w.Write([]byte("hello\n")); err != nil || n != 6 {
+		t.Fatalf("tee write = %d, %v", n, err)
+	}
+	h := btLogFilter{slog.NewTextHandler(failWriter{}, &slog.HandlerOptions{Level: slog.LevelWarn})}
+	r := slog.NewRecord(time.Now(), slog.LevelWarn, "tracker client: unexpected announce response", 0)
+	if err := h.Handle(context.Background(), r); err != nil {
+		t.Fatalf("btLogFilter returned %v; anacrolix/log would panic", err)
+	}
+	// 端到端：经 anacrolix/log 的 slog 适配器写一条 WARN，不能 panic
+	defer func() {
+		if p := recover(); p != nil {
+			t.Fatalf("anacrolix log panicked: %v", p)
+		}
+	}()
+	alog.SlogHandlerAsHandler{SlogHandler: h}.Handle(alog.Record{Msg: alog.Str("unexpected announce response"), Level: alog.Warning})
 }

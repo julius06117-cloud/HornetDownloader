@@ -44,6 +44,8 @@ HornetDownloader.exe 即可运行（yt-dlp 首次使用视频站链接时再下�
 - 仅「自动/默认」且 BitTorrent 因其它原因失败时，才回退 aria2，并在提示里写明原因。
 
 修正（v1.5.4）：
+- 修复一处崩溃：BT 下载中出现某些警告（例如磁力里带 wss:// tracker）时，正常双击启动的程序
+  可能直接退出（crash-*.log 里是「write /dev/stderr: The handle is invalid」）。
 - 下载到网页（HTML）而判为失败的任务，重启后不再被 aria2 重新下载一遍；任务仍显示为失败，
   可以删除，也可以「重新开始」（按原链接重新下载）。v1.5.3 留下的这类任务会自动转换。
 - 添加 .torrent 种子时，不再往下载文件夹里复制一份 .torrent；种子保存在

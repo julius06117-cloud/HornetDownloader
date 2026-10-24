@@ -275,6 +275,27 @@ func (p *prefixLogger) Write(b []byte) (int, error) {
 }
 
 // multiWriter：app.log（超过 max 字节后不再写入）+ stderr（控制台运行时可见）。
+//
+// v1.5.4：不能用 io.MultiWriter——GUI 子系统进程（双击、开始菜单、Start-Process 启动）往往没有有效的
+// stderr，写入返回 "The handle is invalid"；MultiWriter 会把这个错误返回给调用方。标准库 log 忽略它，
+// 但 BT 引擎（anacrolix/log 的 slog 适配）遇到写日志出错会直接 panic，整个程序退出（QA 中 wss tracker
+// 的一条 WARN 就触发了）。这里 stderr 只是尽力而为，错误一律忽略。
 func multiWriter(f *os.File, max int64) io.Writer {
-	return io.MultiWriter(&capWriter{f: f, max: max}, os.Stderr)
+	return logTee{file: &capWriter{f: f, max: max}, best: os.Stderr}
+}
+
+type logTee struct {
+	file io.Writer
+	best io.Writer // 尽力写入，错误忽略
+}
+
+func (t logTee) Write(p []byte) (int, error) {
+	n, err := t.file.Write(p)
+	if t.best != nil {
+		_, _ = t.best.Write(p)
+	}
+	if err != nil {
+		return n, err
+	}
+	return len(p), nil
 }

@@ -1532,7 +1532,10 @@ func (h btLogFilter) Handle(ctx context.Context, r slog.Record) error {
 			return nil
 		}
 	}
-	return h.Handler.Handle(ctx, r)
+	// v1.5.4：写日志失败（例如 GUI 进程没有 stderr、日志文件写满）绝不能向上返回：
+	// anacrolix/log 的 SlogHandlerAsHandler 收到错误会 panic，整个程序直接退出。
+	_ = h.Handler.Handle(ctx, r)
+	return nil
 }
 
 func (h btLogFilter) WithAttrs(as []slog.Attr) slog.Handler {
