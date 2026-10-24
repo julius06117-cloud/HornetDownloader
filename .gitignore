@@ -19,3 +19,4 @@ pending-delete.json
 bt-session.json
 dht*.dat
 /hdqa/
+/cmd/hdl/*.exe
