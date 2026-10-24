@@ -43,7 +43,7 @@ QA instance isolated from any real install: `--data-dir <qa>\data --port 16931 -
 | 8 | Install | `install.ps1 -FromDir dist`: fresh install (changed=true), re-run (changed=false) | PASS | |
 | 9 | Install | `install.ps1 -AddToPath`: PATH kept as REG_EXPAND_SZ, idempotent, restored after test | PASS | |
 | 10 | Install | Tampered SHA256SUMS is rejected, nothing installed | PASS | |
-| 11 | Install | `install.ps1` from the live release (anonymous HTTPS) | after publish | run against the published release right after tagging |
+| 11 | Install | `install.ps1` from the live release (anonymous HTTPS) | PASS (v1.5.3) | SHA256 OK, changed=true then re-run changed=false; installed exe version 1.5.3 |
 | 12 | CLI | `hdl help --json` lists 8 commands | PASS | |
 | 13 | CLI | Usage errors → exit 2 (no URL, unknown command, bad URL) | PASS | |
 | 14 | CLI | App not running: `list` → 3, `get --no-start` → 3 | PASS | |
