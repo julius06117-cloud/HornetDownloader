@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -333,6 +334,9 @@ func main() {
 		log.SetOutput(multiWriter(logf, 64<<20))
 	}
 	log.Printf("%s %s 启动 pid=%d %s", appName, AppVersion, os.Getpid(), runtimeInfo())
+	if runtime.GOOS == "windows" && badWindowsToolchain(runtime.Version()) {
+		log.Printf("[diag] 警告：本程序用 %s 构建，该版本在 Windows 上有 UDP 栈损坏缺陷（golang/go#77975），BT 下载时可能崩溃退出", runtime.Version())
+	}
 	setupCrashOutput(dataDir)
 	defer closeCrashOutput()
 	applyMemoryLimit()

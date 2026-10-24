@@ -65,6 +65,11 @@ func (a *App) applyAria2Overrides(list []map[string]any) []map[string]any {
 			a.kickGuard()
 			continue
 		}
+		if fmt.Sprint(t["status"]) == "complete" && t["bittorrent"] == nil && !guardChecked(g) {
+			// 刚完成的 HTTP 任务先就地做 HTML 检查再报告「完成」，否则 hdl get / wait
+			// 会在后台检查（最多 10 秒后）判失败之前就以成功退出。
+			a.checkCompletedNow(g)
+		}
 		if msg, ok := a.forcedError(g); ok {
 			t["status"] = "error"
 			t["errorMessage"] = msg
@@ -250,6 +255,25 @@ func looksLikeHTML(head []byte) bool {
 		return true
 	}
 	return strings.HasPrefix(http.DetectContentType(head), "text/html")
+}
+
+func guardChecked(gid string) bool {
+	guards.mu.Lock()
+	defer guards.mu.Unlock()
+	return guards.checked[gid]
+}
+
+// checkCompletedNow 读取单个已完成任务的文件信息并立即做完成检查（每个任务只做一次）。
+func (a *App) checkCompletedNow(gid string) {
+	if a.aria == nil {
+		return
+	}
+	var st guardStatus
+	keys := []string{"gid", "status", "dir", "errorMessage", "totalLength", "completedLength", "bittorrent", "files"}
+	if err := a.aria.Call("aria2.tellStatus", []any{gid, keys}, &st); err != nil || st.Status != "complete" || st.Bittorrent != nil {
+		return
+	}
+	a.checkCompletedHTTP(&st)
 }
 
 func (a *App) checkCompletedHTTP(st *guardStatus) {

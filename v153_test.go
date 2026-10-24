@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"errors"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -181,5 +185,34 @@ func TestPprofLoopbackOnly(t *testing.T) {
 	}
 	if pprofAddr("127.0.0.1:6061") == "" {
 		t.Fatal("loopback pprof refused")
+	}
+}
+
+// go1.26.0 / go1.26.1 在 Windows 上做重叠 UDP 收发时会写坏 goroutine 栈（golang/go#77975），
+// 表现为 BT 下载时程序无声退出（0xc0000005，高 32 位被改成小整数）。禁止用这两个版本发布。
+func TestToolchainNotAffectedByWindowsUDPStackBug(t *testing.T) {
+	if badWindowsToolchain(runtime.Version()) {
+		t.Fatalf("%s 有 Windows UDP 栈损坏缺陷（golang/go#77975），请用 go1.26.2 及以上构建（go.mod 的 toolchain 行）", runtime.Version())
+	}
+	for v, bad := range map[string]bool{"go1.26.0": true, "go1.26.1": true, "go1.26rc2": true, "go1.26.2": false, "go1.26.10": false, "go1.27.3": false, "go1.25.7": false} {
+		if got := badWindowsToolchain(v); got != bad {
+			t.Errorf("badWindowsToolchain(%q)=%v want %v", v, got, bad)
+		}
+	}
+}
+
+func TestBTLogFilterDropsHashNoise(t *testing.T) {
+	var buf bytes.Buffer
+	l := slog.New(btLogFilter{slog.NewTextHandler(&buf, nil)})
+	l.Warn("finished hashing piece", "piece", 1, "correct", true, "err", errors.New("short write"))
+	l.Warn("finished hashing piece", "piece", 2, "correct", false, "err", errors.New("short write"))
+	l.Warn("finished hashing piece", "piece", 3, "correct", false)
+	l.Warn("something else", "err", errors.New("short write"))
+	out := buf.String()
+	if strings.Contains(out, "piece=1") || strings.Contains(out, "piece=2") {
+		t.Fatalf("hash noise not filtered:\n%s", out)
+	}
+	if !strings.Contains(out, "piece=3") || !strings.Contains(out, "something else") {
+		t.Fatalf("real warnings dropped:\n%s", out)
 	}
 }

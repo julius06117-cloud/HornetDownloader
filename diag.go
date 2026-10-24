@@ -307,6 +307,12 @@ func (a *App) startPprof(addr string) {
 	})
 }
 
+// badWindowsToolchain：go1.26.0 / go1.26.1（含 rc）在 Windows 上做重叠 UDP 收发时会写坏 goroutine 栈
+// （golang/go#77975，1.26.2 修复）。BT 的 DHT / UDP Tracker 流量大时程序会直接崩溃退出。
+func badWindowsToolchain(v string) bool {
+	return v == "go1.26.0" || v == "go1.26.1" || strings.HasPrefix(v, "go1.26rc") || strings.HasPrefix(v, "go1.26beta")
+}
+
 func runtimeInfo() string {
 	return fmt.Sprintf("go=%s %s/%s cpus=%d btFileIO=%s", runtime.Version(), runtime.GOOS, runtime.GOARCH,
 		runtime.NumCPU(), os.Getenv("TORRENT_STORAGE_DEFAULT_FILE_IO"))

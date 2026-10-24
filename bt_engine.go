@@ -1416,15 +1416,19 @@ type btLogFilter struct{ slog.Handler }
 
 func (h btLogFilter) Handle(ctx context.Context, r slog.Record) error {
 	if r.Message == "finished hashing piece" {
-		correct := false
+		correct, shortWrite := false, false
 		r.Attrs(func(a slog.Attr) bool {
-			if a.Key == "correct" {
+			switch a.Key {
+			case "correct":
 				correct = a.Value.Kind() == slog.KindBool && a.Value.Bool()
-				return false
+			case "err":
+				shortWrite = strings.Contains(a.Value.String(), "short write")
 			}
 			return true
 		})
-		if correct {
+		// correct=false + short write：重新校验时这块数据还没写到磁盘（例如上次异常退出），
+		// 引擎会重新下载这一块，属正常情况；以前每块一条 WARN，几秒就把 app.log 写满。
+		if correct || shortWrite {
 			return nil
 		}
 	}

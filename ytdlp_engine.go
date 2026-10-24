@@ -229,6 +229,12 @@ func (e *YTDLPEngine) AddURL(uri, dir string) (string, error) {
 		}
 		task.status = "complete"
 		task.done = task.total
+		// 进度条用的是相对值 0..1000；完成后报告真实文件大小，agent 拿到的 totalBytes 才有意义
+		if task.outPath != "" {
+			if fi, err := os.Stat(task.outPath); err == nil && fi.Size() > 0 {
+				task.total, task.done = fi.Size(), fi.Size()
+			}
+		}
 		if task.total == 0 {
 			task.total = 1
 			task.done = 1

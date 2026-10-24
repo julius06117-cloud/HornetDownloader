@@ -2,6 +2,11 @@ module hornetdl
 
 go 1.26.0
 
+// go1.26.0 and 1.26.1 corrupt goroutine stacks on Windows during overlapped UDP socket I/O
+// (golang/go#77975, fixed in 1.26.2 by #78041) — the cause of the v1.5.x "silent exit"
+// under BitTorrent load (DHT / UDP trackers). Build with this patched toolchain or newer.
+toolchain go1.26.10
+
 require (
 	github.com/anacrolix/torrent v1.61.0
 	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
