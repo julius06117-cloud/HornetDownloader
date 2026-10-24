@@ -30,11 +30,24 @@ $out = Join-Path $PSScriptRoot "build\HornetDownloader.exe"
 Write-Host "==> go build -> $out" -ForegroundColor Cyan
 go build -trimpath -ldflags "-s -w -H windowsgui" -o $out .
 if ($LASTEXITCODE -ne 0) { throw "build failed" }
+# Console companion CLI for scripts and agents (reliable stdout and exit codes)
+$hdl = Join-Path $PSScriptRoot "build\hdl.exe"
+Write-Host "==> go build -> $hdl" -ForegroundColor Cyan
+go build -trimpath -ldflags "-s -w" -o $hdl ./cmd/hdl
+if ($LASTEXITCODE -ne 0) { throw "hdl build failed" }
 
 $pkg = Join-Path $PSScriptRoot "build\pkg\HornetDownloader"
 Remove-Item -Recurse -Force $pkg -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $pkg | Out-Null
 Copy-Item $out (Join-Path $pkg "HornetDownloader.exe")
+Copy-Item $hdl (Join-Path $pkg "hdl.exe")
+# Licenses: MIT for our code + third-party notices (aria2 is GPL-2.0-or-later)
+Copy-Item "LICENSE" (Join-Path $pkg "LICENSE.txt")
+Copy-Item "THIRD_PARTY_NOTICES.md" (Join-Path $pkg "THIRD_PARTY_NOTICES.md")
+$lic = Join-Path $pkg "licenses"
+New-Item -ItemType Directory -Force -Path $lic | Out-Null
+Copy-Item "third_party\aria2-1.37.0-win-64bit-build1\COPYING" (Join-Path $lic "aria2-COPYING.txt")
+Copy-Item "third_party\aria2-1.37.0-win-64bit-build1\LICENSE.OpenSSL" (Join-Path $lic "aria2-LICENSE.OpenSSL.txt")
 if (Test-Path "README.zh-CN.txt") {
   Copy-Item "README.zh-CN.txt" (Join-Path $pkg "README.txt")
 }
@@ -42,6 +55,15 @@ if (Test-Path "README.zh-CN.txt") {
 $zip = Join-Path $PSScriptRoot "dist\HornetDownloader-win64.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path $pkg -DestinationPath $zip -Force
+
+# Standalone release assets with stable names + SHA256SUMS.txt
+Copy-Item $out (Join-Path $PSScriptRoot "dist\HornetDownloader.exe") -Force
+Copy-Item $hdl (Join-Path $PSScriptRoot "dist\hdl.exe") -Force
+Copy-Item "scripts\install.ps1" (Join-Path $PSScriptRoot "dist\install.ps1") -Force
+$sums = foreach ($n in "HornetDownloader-win64.zip", "HornetDownloader.exe", "hdl.exe", "install.ps1") {
+  "{0}  {1}" -f (Get-FileHash (Join-Path $PSScriptRoot "dist\$n") -Algorithm SHA256).Hash.ToLower(), $n
+}
+[System.IO.File]::WriteAllText((Join-Path $PSScriptRoot "dist\SHA256SUMS.txt"), (($sums -join "`n") + "`n"))
 
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
 $len = (Get-Item $zip).Length

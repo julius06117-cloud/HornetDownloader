@@ -7,3 +7,15 @@ screenshots/
 *.test
 /hornetdl.exe
 /hornetdl
+
+# runtime data / personal files (the repo is public)
+config.json
+api-token
+api-port
+ui.token
+task-source.json
+pending-delete.json
+*.session
+bt-session.json
+dht*.dat
+/hdqa/
