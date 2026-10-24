@@ -1,0 +1,13 @@
+---
+description: Rules for editing the single-page WebView2 UI in web/
+globs: web/**
+alwaysApply: false
+---
+
+- `web/index.html` is the whole UI (HTML+CSS+JS, no bundler); it is embedded with `//go:embed web`. CSP: no external scripts/styles/fonts.
+- All strings in Simplified Chinese, short. Fonts: `HornetUI` (Noto Sans SC) for UI, `HornetQuote` (LXGW WenKai) for the love quote. Never 宋体.
+- API calls need the `X-Token` header; mutations are POST. Actions are queued server-side and return immediately — show "处理中…" rather than blocking.
+- `buildOps(t)`: exactly one pause/resume button per row; stop/delete live in the context menu. If you change it, update `scripts/ui_ops_check.mjs` and `ui_ops_test.go`.
+- Status column: short text + sub-line, full text in tooltip/details (`status_ui_test.go`).
+- Context menu opens on right-click, the `⋯` button, Shift+F10 / ContextMenu key; Esc closes. Whole-row click selects.
+- Love quote is inline on the main UI, never a popup.

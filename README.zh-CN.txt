@@ -43,6 +43,17 @@ HornetDownloader.exe 即可运行（yt-dlp 首次使用视频站链接时再下�
 - 手动指定引擎失败时不再偷偷换成 aria2；同一磁力已在列表时返回已有任务，不会再添加一份 aria2。
 - 仅「自动/默认」且 BitTorrent 因其它原因失败时，才回退 aria2，并在提示里写明原因。
 
+命令行与自动化（v1.5.2）：
+- 新增 hdl.exe（与 HornetDownloader.exe 放在同一文件夹）：脚本 / 编程助手可以用
+    hdl get "链接" --dir D:\下载 --json
+  下载并等待完成；还有 add / wait / status / list / pause / resume / remove。
+  程序没打开时会在后台无窗口启动；之后双击 exe 打开的是同一个实例。
+- 命令行或脚本添加的任务在列表里带「Agent」标记，左侧「来源」可筛选「我添加的 / Agent 添加的」。
+- 详细说明：https://github.com/julius06117-cloud/HornetDownloader/blob/main/docs/AGENT_API.md
+- 删除 BT 任务并勾选删除文件时，未下载完的 .part 文件与程序保存的 .torrent 副本也会删除
+  （如果文件仍被占用，会在下次启动时删除）。
+- 许可：MIT（见 LICENSE.txt）；第三方组件见 THIRD_PARTY_NOTICES.md 与 licenses 文件夹。
+
 防火墙与端口（v1.5.2）：
 - aria2 只负责 HTTP/FTP，平时只监听本机 127.0.0.1，不会再触发防火墙弹窗；
   它的 DHT/PEX/LPD 已关闭（磁力/种子默认由内置 BitTorrent 引擎处理）。

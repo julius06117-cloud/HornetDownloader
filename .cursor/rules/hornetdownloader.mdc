@@ -1,0 +1,19 @@
+---
+description: HornetDownloader project rules (agent-first Windows downloader: Go + embedded aria2 + anacrolix BT + yt-dlp, WebView2 UI, CLI/API for agents)
+alwaysApply: true
+---
+
+Read `AGENTS.md` at the repo root first; it has the file map, engine routing rules, API list and definition of done.
+
+Key rules:
+- Go, `CGO_ENABLED=0`, windows/amd64, single portable exe. No cgo / DLL dependencies.
+- Every task add goes through `routeAdd` (engines.go). Explicit engine failure = error, never silent aria2 fallback; duplicate magnet returns the existing task.
+- UI must never wait on aria2: use the poller cache and action queue in `resilience.go`; long RPCs use the slow pool.
+- Keep `fileAllocation` auto → prealloc on Windows; keep BT map piece completion + part files.
+- User-facing text is Simplified Chinese; UI font Noto Sans SC (never 宋体).
+- Done = `go vet ./...` + `go test ./...` pass on Windows, `.\build.ps1` succeeds, and you self-QA the exe before handing over.
+- On Windows agent shells, run PowerShell via a `.ps1` file with `-File` (inline `-Command` strips `$vars`).
+- Automation contract = CLI (`internal/agentcli`, `hdl.exe`) + `/api/v1/*` (`agent_api.go`), documented in `docs/AGENT_API.md`. Keep JSON fields and exit codes (0 ok, 1 failed, 2 usage, 3 unavailable, 4 timeout, 5 rejected) backward compatible; update docs + `helpJSON()` with any change.
+- Tests and the app must not open public listeners except the BT engine port; tests bind 127.0.0.1 only (no Windows Firewall prompts).
+- Repo is public: never commit personal paths, usernames, logs, screenshots, `config.json` or tokens.
+- Test only with legal content (Linux ISOs, self-made torrents).

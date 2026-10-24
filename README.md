@@ -1,27 +1,44 @@
 # HornetDownloader
 
-Windows 便携多引擎下载器（无广告、无上报）。单 `exe`：内嵌 aria2 + 纯 Go BitTorrent（anacrolix）+ 旁路 yt-dlp；本地 HTTP UI（WebView2）。
+**Agent-first** 的 Windows 便携多引擎下载器（无广告、无上报）。单 `exe`：内嵌 aria2 + 纯 Go BitTorrent（anacrolix）+ 旁路 yt-dlp；本地 HTTP UI（WebView2）。
+人用界面，脚本 / AI 编程助手用命令行 `hdl.exe`（JSON 输出、固定退出码、无窗口自启）和本地 API `/api/v1/*`，两边看到的是同一批任务。
 
-**面向读者**：本文件优先给 coding agent / 维护者。终端用户说明见打包内的 `README.zh-CN.txt`；本机环境见 `DEV.md`。
+**面向读者**：本文件优先给 coding agent / 维护者。代理协作约定见 [`AGENTS.md`](AGENTS.md)；自动化接口（CLI / API / 安装）见 [`docs/AGENT_API.md`](docs/AGENT_API.md)；终端用户说明见打包内的 `README.zh-CN.txt`；本机环境见 `DEV.md`。
 
-当前版本：**v1.5.1** · 模块名 `hornetdl` · Go **1.26** · **`CGO_ENABLED=0`**（必须保持，便于单文件分发）。
+当前版本：**v1.5.2** · 模块名 `hornetdl` · Go **1.26** · **`CGO_ENABLED=0`**（必须保持，便于单文件分发）。
+
+---
+
+## 安装 / 下载（用户与 agent 通用）
+
+Release 资产名固定，`latest` 链接永远指向最新版（仓库公开，匿名 HTTPS 即可，`gh` 可选）：
+
+```powershell
+# 下载 install.ps1 → 校验 SHA256 → 装到 %LOCALAPPDATA%\Programs\HornetDownloader（免管理员、可重复执行）
+$f = "$env:TEMP\hd-install.ps1"
+Invoke-WebRequest https://github.com/julius06117-cloud/HornetDownloader/releases/latest/download/install.ps1 -OutFile $f -UseBasicParsing
+powershell -NoProfile -ExecutionPolicy Bypass -File $f -AddToPath -Json
+# 国内访问 GitHub 慢：加 -Mirror https://ghfast.top/ -Retries 5；也可 gh release download 兜底
+```
+
+资产：`HornetDownloader-win64.zip`、`HornetDownloader.exe`、`hdl.exe`、`install.ps1`、`SHA256SUMS.txt`、`release.json`（版本、各资产 URL/SHA256/大小、安装命令）。手动安装与校验见 `docs/AGENT_API.md`。
 
 ---
 
 ## Agent 快速上手
 
 ```powershell
-cd %USERPROFILE%\dev\HornetDownloader
+cd $env:USERPROFILE\dev\HornetDownloader   # 你的克隆目录
 $env:CGO_ENABLED = "0"
 $env:GOPROXY = "https://goproxy.cn,direct"   # 国内建议
 go test ./...
 go run .
-.\build.ps1                # 测 + 打 zip → dist\HornetDownloader-win64.zip
+.\build.ps1                # 测 + 打 zip → dist\（zip、exe、hdl.exe、install.ps1、SHA256SUMS.txt）
 .\build.ps1 -SkipTest
 .\build.ps1 -Run
 ```
 
-产物：`build\HornetDownloader.exe`，发布包把 `README.zh-CN.txt` 复制为 `README.txt`。
+产物：`build\HornetDownloader.exe`（GUI 子系统，无黑框）+ `build\hdl.exe`（控制台版，脚本用）。发布包把 `README.zh-CN.txt` 复制为 `README.txt`，并附 `LICENSE.txt`、`THIRD_PARTY_NOTICES.md`、`licenses\`。发布前按 [`QA-CHECKLIST.md`](QA-CHECKLIST.md) 全量自测。
 
 合法内容测速：公开 HTTP、自建种子、发行版镜像。不要用盗版资源。
 
@@ -30,7 +47,8 @@ go run .
 ## 架构（改代码前先对上号）
 
 ```
-[WebView2 / Edge]  →  localhost:16801 + X-Token
+[WebView2 / Edge]  →  127.0.0.1:16801 + X-Token
+[hdl.exe / 脚本]   →  127.0.0.1:16801/api/v1/* + api-token   (agent_api.go, internal/agentcli)
         │
    server.go (embed web/)     resilience.go（任务缓存 / 操作队列 / 文件列表分页）
         │
@@ -41,11 +59,12 @@ go run .
 ```
 
 - **UI**：`web/index.html`（单页，`//go:embed web`）。改 UI 即改此文件；无独立前端构建。
-- **安全**：API 仅本机 Host；自定义头 `X-Token`；DNS 重绑定防护在 `server.go` `routes()`。
+- **安全**：API 仅本机 Host；`X-Token` 或 `Authorization: Bearer`（UI 每次启动的令牌，或持久的 `api-token`）；DNS 重绑定防护在 `server.go` `routes()`；无 CORS。
+- **监听 / 防火墙**：UI/API 与 aria2 RPC 只绑回环；aria2 关 DHT/PEX/LPD，空闲时不开公网端口。只有 BT 引擎监听一个固定端口（`Config.BTPort`，6881–6999），所以 Windows 只会问一次；设置里「添加防火墙规则」经 **UAC** 提权写规则（默认仅专用网络），绝不静默提权；`--firewall-dry-run` 只打印 netsh 命令。测试只绑 `127.0.0.1`，跑测试不会弹防火墙。
 - **Windows 壳**：托盘 / 窗口 / 剪贴板 / 文件关联 → `*_windows.go`；非 Windows stub → `*_other.go`。
 - **内嵌二进制**：`embed/aria2c.exe`（`embed_windows.go` 首次释放到 `%APPDATA%\HornetDownloader\bin\`）。yt-dlp **不**内嵌，首次用时下载到同目录。
 
-运行时数据：`%APPDATA%\HornetDownloader\`（`config.json`、`aria2.session`、`bt-session.json`、`bin\`、`app.log`）。
+运行时数据：`%APPDATA%\HornetDownloader\`（`config.json`、`aria2.session`、`bt-session.json`、`bin\`、`app.log`、`api-token`、`api-port`、`task-source.json`）。不要提交这些文件（仓库公开）。
 
 ---
 
@@ -53,7 +72,10 @@ go run .
 
 | 文件 | 职责 |
 |------|------|
-| `main.go` | 启动、配置、单实例、inbox、CLI flags |
+| `main.go` | 启动、配置、单实例、inbox、CLI flags、分派 CLI 子命令 |
+| `agent_api.go` | 自动化 API `/api/v1/*`、`api-token`、幂等添加、任务来源（agent / user） |
+| `internal/agentcli/` · `cmd/hdl/` | 命令行 `get/add/wait/status/list/…`；`hdl.exe` 控制台版 |
+| `firewall_cmds.go` / `firewall_windows.go` | netsh 命令构造（可测）/ UAC 提权执行 |
 | `server.go` | HTTP 路由、RPC 白名单、任务合并 API |
 | `engines.go` | `routeAdd` / 添加与引擎调度 |
 | `recommend.go` | 引擎常量、`RecommendEngine`、`resolveEngine` |
@@ -64,7 +86,8 @@ go run .
 | `details.go` | `/api/details`、`/api/reselect` |
 | `artifacts.go` | 下载产物路径辅助 |
 | `tray_*.go` / `window_*.go` / `clipboard_*.go` / `assoc_*.go` | 平台相关 |
-| `*_test.go` | 引擎路由、API、BT 重选/速度等；改路由必跑相关测 |
+| `scripts/install.ps1` · `scripts/release.ps1` | 安装（下载、校验、安装、PATH）/ 发布 GitHub Release |
+| `*_test.go` | 引擎路由、API、CLI、BT 重选/速度等；改路由必跑相关测 |
 
 ---
 
@@ -88,7 +111,18 @@ go run .
 
 ## HTTP API（本地）
 
-前缀 `/api/*`，需头 `X-Token`（与 UI 启动 URL 一致）。常用：
+前缀 `/api/*`，需头 `X-Token`（与 UI 启动 URL 一致）或 `Authorization: Bearer <api-token>`。
+
+**给 agent / 脚本的稳定接口是 `/api/v1/*`**（字段只增不改，详见 `docs/AGENT_API.md`）：
+
+| 路径 | 用途 |
+|------|------|
+| `GET /api/v1/ping` | 存活检查（不算 UI 心跳） |
+| `POST /api/v1/add` | 添加 `{url \| torrentB64, dir, engine, selectFiles, force}`；同源同目录幂等，返回 `existing` |
+| `GET /api/v1/task?id=` · `GET /api/v1/tasks` | 统一任务视图（status/progress/files/peers/addedBy…），不消费 UI 通知 |
+| `POST /api/v1/pause` · `resume` · `remove` | 控制；未知 id 返回 404 |
+
+UI 内部路由（可随版本变化）常用：
 
 | 路径 | 用途 |
 |------|------|
@@ -119,16 +153,38 @@ GID 前缀：`bt-*` → BitTorrent，`yt-*` → yt-dlp，其余 → aria2。`eng
 
 ---
 
-## CLI（调试）
+## CLI
+
+### 自动化命令（agent / 脚本）
+
+脚本里用 **`hdl.exe`**（控制台子系统，PowerShell 会等待并拿到输出）；`HornetDownloader.exe <命令>` 也支持，但需要管道（`| Out-String`）。
+
+```
+hdl get    <url|magnet|file.torrent> [--dir D] [--engine auto|aria2|bt|ytdlp] [--json] [--timeout 30m] [--force]
+hdl add    <url|magnet|file.torrent> [--dir D] [--engine E] [--wait] [--json]
+hdl wait   <id> [--json] [--timeout 30m]
+hdl status <id> [--json]
+hdl list   [--json]
+hdl remove <id> [--delete-files]   ·   hdl pause|resume <id>
+hdl help   --json                  # 机器可读的命令 / 退出码清单
+```
+
+- `get` = 添加并等待，成功后输出文件路径（`--json` 输出完整任务对象）；进度只写 stderr。
+- 退出码：`0` 成功 · `1` 任务失败 / 不存在 · `2` 参数错误 · `3` 应用不可用 · `4` 超时（任务继续跑，JSON 里带 id）· `5` 添加被拒。
+- 应用没开时自动以 `--no-window` **无窗口**启动（不抢焦点）；之后双击 exe 会接到同一实例。`--no-start` 关闭自启。
+- 同一链接 + 同一目录重复 `get` 直接返回已有任务（已完成且文件还在才算）；`--force` 重新下载。
+- CLI / API 添加的任务在界面上带「Agent」标记，侧栏「来源」可筛选。
+
+### 程序参数（调试）
 
 ```
 HornetDownloader.exe [--port 16801] [--data-dir PATH] [--aria2 PATH]
-                     [--browser] [--no-window]
+                     [--browser] [--no-window] [--firewall-dry-run]
                      [--register-assoc | --unregister-assoc]
                      [URL | .torrent ...]
 ```
 
-默认端口 `16801`。`--browser`：不用 WebView2，改用 Edge 应用窗口。
+默认端口 `16801`。`--browser`：不用 WebView2，改用 Edge 应用窗口。`--no-window`：无窗口后台服务（CLI 自启用）。`--firewall-dry-run`：打印防火墙规则命令，不提权。
 
 ---
 
@@ -137,6 +193,9 @@ HornetDownloader.exe [--port 16801] [--data-dir PATH] [--aria2 PATH]
 | 文件 | 给谁 |
 |------|------|
 | **本 README** | Agent / 贡献者：架构、不变量、改哪里 |
+| `AGENTS.md` | 编程助手协作约定：文件地图、路由规则、完成标准（`.cursor/rules`、`.github/copilot-instructions.md` 指向它） |
+| `docs/AGENT_API.md` | 自动化契约：安装、CLI、退出码、任务 JSON、`/api/v1` |
+| `QA-CHECKLIST.md` | 发布前 QA 清单与最近一次结果 |
 | `DEV.md` | 本机 Home 开发环境与日常命令 |
 | `README.zh-CN.txt` | 终端用户；打进 zip 为 `README.txt` |
 
@@ -144,9 +203,13 @@ HornetDownloader.exe [--port 16801] [--data-dir PATH] [--aria2 PATH]
 
 ---
 
+## 许可证
+
+本项目以 **MIT** 许可发布，见 [`LICENSE`](LICENSE)（Copyright (c) 2026 julius06117-cloud）。第三方组件各自许可，见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)；发布包内同时附带 `LICENSE.txt`、`THIRD_PARTY_NOTICES.md` 与 `licenses\`。
+
 ## 开源依赖（摘要）
 
-- aria2 1.37.0（GPL-2.0）— 内嵌
+- aria2 1.37.0（GPL-2.0-or-later，含 OpenSSL 例外）— 内嵌，作为独立进程运行；源码链接见 `THIRD_PARTY_NOTICES.md`
 - [anacrolix/torrent](https://github.com/anacrolix/torrent)（MPL-2.0）
-- yt-dlp（旁路，可选）
+- yt-dlp（Unlicense；旁路，可选，首次用时下载，不打包）
 - go-webview2 · 字体见 `web/fonts/LICENSES.txt`
