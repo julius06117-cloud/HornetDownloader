@@ -46,6 +46,9 @@ type Config struct {
 	// FileAllocation: auto | prealloc | none | trunc。auto 在 Windows 上用 prealloc：
 	// NTFS 上 none/trunc 会在随机写入时同步补零，aria2 整个进程（含 RPC）卡住几十秒。
 	FileAllocation string `json:"fileAllocation"`
+	// BTPort: BitTorrent 监听端口，首次运行从 6881–6999 选一个后固定下来，
+	// 这样防火墙 / 路由器端口映射规则不会因每次换端口而失效。0 = 尚未选定。
+	BTPort int `json:"btPort,omitempty"`
 }
 
 func (c Config) effectiveFileAllocation() string {
@@ -157,6 +160,9 @@ func (a *App) normalize(c *Config) {
 	if c.SeedMinutes < 0 {
 		c.SeedMinutes = 0
 	}
+	if c.BTPort < 1024 || c.BTPort > 65535 {
+		c.BTPort = 0
+	}
 	switch c.FileAllocation {
 	case "auto", "prealloc", "none", "trunc":
 	default:
@@ -204,7 +210,17 @@ func main() {
 	flag.BoolVar(&forceBrowser, "browser", false, "Windows：不用 WebView2，改用 Edge 应用窗口")
 	regAssoc := flag.Bool("register-assoc", false, "注册 magnet / .torrent 系统关联（Windows）")
 	unregAssoc := flag.Bool("unregister-assoc", false, "取消 magnet / .torrent 系统关联（Windows）")
+	fwAction := flag.String("firewall-rules", "", "add | remove：写入/删除 Windows 防火墙规则（需管理员，由设置页通过 UAC 调用）")
+	fwPublic := flag.Bool("firewall-public", false, "防火墙规则同时允许公用网络")
+	fwAria2 := flag.String("firewall-aria2", "", "同时放行的 aria2c.exe 路径")
 	flag.Parse()
+	if *fwAction != "" {
+		if err := applyFirewallRules(*fwAction, *fwPublic, *fwAria2); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		return
+	}
 	if *regAssoc {
 		if err := registerAssociations(); err != nil {
 			fatal("注册关联失败: " + err.Error())
@@ -287,6 +303,16 @@ func main() {
 	if err != nil {
 		log.Println("BitTorrent 引擎启动失败（磁力/种子将回退 aria2）:", err)
 		app.bt = nil
+	} else {
+		app.mu.Lock()
+		if app.bt.listen > 0 && app.cfg.BTPort != app.bt.listen {
+			log.Printf("BitTorrent 监听端口固定为 %d（原配置 %d）", app.bt.listen, app.cfg.BTPort)
+			app.cfg.BTPort = app.bt.listen
+			if err := app.saveConfig(); err != nil {
+				log.Println("保存 BT 端口失败:", err)
+			}
+		}
+		app.mu.Unlock()
 	}
 	app.yt = StartYTDLPEngine(dataDir, func() Config {
 		app.mu.Lock()
@@ -371,15 +397,15 @@ func (a *App) ariaArgs() []string {
 		"--enable-http-pipelining=true",
 		"--always-resume=true",
 		"--max-resume-failure-tries=0",
-		// BT：DHT/LPD/PEX + 国内可达 Tracker；IPv6 DHT 默认开（双栈家宽有用，纯 IPv4 无害）
-		"--enable-dht=true",
-		"--enable-dht6=true",
-		"--dht-file-path=" + filepath.Join(a.dataDir, "dht.dat"),
-		"--dht-file-path6=" + filepath.Join(a.dataDir, "dht6.dat"),
-		"--bt-enable-lpd=true",
-		"--enable-peer-exchange=true",
-		"--listen-port=6881-6999", // 常见 BT 端口段，便于路由器端口触发/映射
-		"--dht-listen-port=6881-6999",
+		// v1.5.2：BT 由内置 BitTorrent 引擎（anacrolix）负责，aria2 主要做 HTTP/FTP。
+		// 关闭 DHT/DHT6/LPD/PEX，aria2 平时只监听 127.0.0.1 上的 RPC，不会触发
+		// Windows 防火墙弹窗。aria2 仅在「自动回退」或手动选 aria2 下种子时才做 BT，
+		// 此时只在 --listen-port 上监听（靠 Tracker 找节点）。
+		"--enable-dht=false",
+		"--enable-dht6=false",
+		"--bt-enable-lpd=false",
+		"--enable-peer-exchange=false",
+		"--listen-port=6881-6999", // 仅 aria2 BT 任务运行时才会打开
 		"--bt-max-peers=128",
 		"--bt-request-peer-speed-limit=40K",
 		"--bt-tracker-connect-timeout=8",

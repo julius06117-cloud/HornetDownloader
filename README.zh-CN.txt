@@ -1,4 +1,4 @@
-Hornet 下载器 v1.5.1（Windows 64 位 · 多引擎便携版）
+Hornet 下载器 v1.5.2（Windows 64 位 · 多引擎便携版）
 ================================================
 
 没有广告、没有数据上报的下载工具。内嵌多个下载引擎，解压后只需一个
@@ -14,7 +14,8 @@ HornetDownloader.exe 即可运行（yt-dlp 首次使用视频站链接时再下�
 1. 解压后双击 HornetDownloader.exe。
    第一次运行会把内嵌的 aria2c 释放到 %APPDATA%\HornetDownloader\bin\，
    并尝试注册 magnet: 与 .torrent 的打开方式。
-2. Windows 防火墙若询问是否允许联网，请选「允许」（否则 BT/磁力会很慢）。
+2. 想让 BT/磁力更快：「设置 → 防火墙 → 添加防火墙规则」，在弹出的 Windows 管理员确认里点「是」。
+   （首次运行若 Windows 防火墙弹窗询问，也可直接选「允许」。）
 3. 「＋ 新建任务」粘贴链接（可多行）；也可 Ctrl+V，或把 .torrent 拖进窗口。
 4. 新建任务时可选择下载引擎：自动 / aria2 / BitTorrent / yt-dlp。
    「自动」会按链接类型给出推荐（界面旁有简短说明）。
@@ -41,6 +42,14 @@ HornetDownloader.exe 即可运行（yt-dlp 首次使用视频站链接时再下�
 - 剪贴板 / 关联 / 命令行 / 拖放 / 种子按钮：走设置「默认引擎」；若是「自动」则跟推荐。
 - 手动指定引擎失败时不再偷偷换成 aria2；同一磁力已在列表时返回已有任务，不会再添加一份 aria2。
 - 仅「自动/默认」且 BitTorrent 因其它原因失败时，才回退 aria2，并在提示里写明原因。
+
+防火墙与端口（v1.5.2）：
+- aria2 只负责 HTTP/FTP，平时只监听本机 127.0.0.1，不会再触发防火墙弹窗；
+  它的 DHT/PEX/LPD 已关闭（磁力/种子默认由内置 BitTorrent 引擎处理）。
+- BitTorrent 监听端口首次选定后固定保存在 config.json（btPort），规则与路由器映射不再失效。
+- 设置页新增「添加防火墙规则 / 删除规则」：通过 Windows 管理员确认写入名为
+  HornetDownloader 的入站规则，默认仅专用网络，可勾选同时允许公用网络；可重复点击。
+- 内嵌 aria2c 固定释放到 %APPDATA%\HornetDownloader\bin\aria2c.exe，内容不变不重写。
 
 界面修正（v1.5.1）：
 - 任务详情切换页签不再被过期响应盖住；Esc 关闭右键菜单；yt-dlp 缺失提示更清楚。
@@ -70,9 +79,9 @@ BitTorrent 速度（v1.5）：
 四、国内网络与磁盘
 ------------------
 - 内置偏国内可达的公共 Tracker（CnTrackersList / XIU2 等思路）。
-- BitTorrent / aria2：DHT / PEX；监听优先 6881–6999；开启 UPnP/NAT-PMP。
+- BitTorrent：DHT / PEX；监听端口在 6881–6999 中选定后固定；开启 UPnP/NAT-PMP。
 - BitTorrent 引擎会定期补加公共 Tracker，状态栏显示「候选/握手/已连」节点数。
-- 请在防火墙放行本程序（入站），否则磁力常显示「寻找节点中」且速度为 0。
+- 请在防火墙放行本程序（入站，设置页一键添加），否则磁力常显示「寻找节点中」且速度为 0。
 - 「磁盘空间分配」默认「自动」：在 Windows 上用 prealloc，避免 NTFS
   随机写入补零时把 aria2（含 RPC）卡住、界面显示「响应超时」。
   可在设置里改为 none / trunc / 强制 prealloc。

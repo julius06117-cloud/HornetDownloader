@@ -66,6 +66,7 @@ func (a *App) routes(port int) http.Handler {
 	api.HandleFunc("/api/tasks", a.handleTasks)
 	api.HandleFunc("/api/inbox", a.handleInbox)
 	api.HandleFunc("/api/assoc", a.handleAssoc)
+	api.HandleFunc("/api/firewall", a.handleFirewall)
 	api.HandleFunc("/api/readtorrent", a.handleReadTorrent)
 	api.HandleFunc("/api/config", a.handleConfig)
 	api.HandleFunc("/api/delete", a.handleDelete)
@@ -114,7 +115,7 @@ func (a *App) routes(port int) http.Handler {
 				http.Error(w, "unauthorized", 401)
 				return
 			}
-			allowGet := r.URL.Path == "/api/ping" || r.URL.Path == "/api/config" || r.URL.Path == "/api/tasks" || r.URL.Path == "/api/inbox" || r.URL.Path == "/api/assoc"
+			allowGet := r.URL.Path == "/api/ping" || r.URL.Path == "/api/config" || r.URL.Path == "/api/tasks" || r.URL.Path == "/api/inbox" || r.URL.Path == "/api/assoc" || r.URL.Path == "/api/firewall"
 			if r.Method != http.MethodPost && !(r.Method == http.MethodGet && allowGet) {
 				http.Error(w, "method not allowed", 405)
 				return
@@ -835,4 +836,41 @@ func (a *App) handleReadTorrent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"name": filepath.Base(p), "b64": base64.StdEncoding.EncodeToString(b)})
+}
+
+// handleFirewall：GET 查询规则状态；POST {action: add|remove, public} 弹 UAC 写规则。
+// POST 会等用户在 UAC 里确认（最长约 2 分钟），界面侧用长超时异步等待。
+func (a *App) handleFirewall(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	btPort := a.cfg.BTPort
+	a.mu.Unlock()
+	if r.Method == http.MethodGet {
+		exists, pathOK := firewallStatus()
+		writeJSON(w, 200, map[string]any{"supported": firewallSupported, "exists": exists, "pathOK": pathOK, "btPort": btPort})
+		return
+	}
+	var req struct {
+		Action string `json:"action"` // add | remove
+		Public bool   `json:"public"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if req.Action != "add" && req.Action != "remove" {
+		writeErr(w, fmt.Errorf("未知操作"))
+		return
+	}
+	aria2 := ""
+	if a.aria != nil && a.aria.cmd != nil {
+		aria2 = a.aria.cmd.Path
+	}
+	if err := requestFirewallRules(req.Action, req.Public, aria2); err != nil {
+		log.Println("防火墙规则:", err)
+		writeErr(w, err)
+		return
+	}
+	exists, pathOK := firewallStatus()
+	log.Printf("防火墙规则 %s 完成（public=%t，exists=%t）", req.Action, req.Public, exists)
+	writeJSON(w, 200, map[string]any{"ok": true, "exists": exists, "pathOK": pathOK, "btPort": btPort})
 }

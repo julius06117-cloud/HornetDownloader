@@ -210,6 +210,17 @@ textarea{width:100%;resize:vertical}
         </div>
       </div>
     </div>
+    <div class="row" style="align-items:flex-start"><label class="k">防火墙</label>
+      <div style="flex:1">
+        <div class="hint">BitTorrent 需要被其他节点连入才能跑满速度。点下方按钮会弹出 Windows 管理员确认，只放行本程序（默认仅专用网络）。</div>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button type="button" id="sFwAdd">添加防火墙规则</button>
+          <button type="button" id="sFwDel">删除规则</button>
+          <label class="hint"><input type="checkbox" id="sFwPub"> 同时允许公用网络</label>
+          <span class="hint" id="sFwSt"></span>
+        </div>
+      </div>
+    </div>
     <p class="hint" id="sInfo"></p>
   </div>
   <div class="ft"><button data-close>取消</button><button class="pri" id="sOk">保存</button></div>
@@ -848,6 +859,27 @@ async function refreshAssoc() {
     $("#sAssocSt").textContent = (j.magnet ? "magnet 已关联" : "magnet 未关联") + " · " + (j.torrent ? ".torrent 已关联" : ".torrent 未关联");
   } catch (e) { $("#sAssocSt").textContent = e.message; }
 }
+async function refreshFirewall() {
+  const st = $("#sFwSt");
+  try {
+    const j = await api("/api/firewall");
+    if (!j.supported) { st.textContent = "当前系统不支持"; $("#sFwAdd").disabled = $("#sFwDel").disabled = true; return; }
+    const port = j.btPort ? "（BT 端口 " + j.btPort + "）" : "";
+    st.textContent = !j.exists ? "未添加规则" + port : (j.pathOK ? "规则已添加" + port : "规则指向旧位置，请重新添加" + port);
+  } catch (e) { st.textContent = e.message; }
+}
+async function firewallAction(action) {
+  const st = $("#sFwSt"), add = $("#sFwAdd"), del = $("#sFwDel");
+  add.disabled = del.disabled = true;
+  st.textContent = "请在弹出的 Windows 窗口中点「是」…";
+  try {
+    await api("/api/firewall", {action, public: $("#sFwPub").checked}, 150000);
+    toast(action === "add" ? "防火墙规则已添加" : "防火墙规则已删除");
+  } catch (e) { toast(e.message, 5000); }
+  finally { add.disabled = del.disabled = false; refreshFirewall(); }
+}
+$("#sFwAdd").onclick = () => firewallAction("add");
+$("#sFwDel").onclick = () => firewallAction("remove");
 $("#btnSet").onclick = async () => {
   const j = await loadCfg();
   $("#sDir").value = cfg.downloadDir; $("#sConc").value = cfg.maxConcurrent; $("#sDl").value = cfg.maxDownloadKB; $("#sUl").value = cfg.maxUploadKB;
@@ -856,6 +888,7 @@ $("#btnSet").onclick = async () => {
   const engSt = (j.btReady ? "BitTorrent 就绪" : "BitTorrent 未启动") + " · " + (j.ytdlpReady ? "yt-dlp 就绪" : "yt-dlp 首次用时自动下载");
   $("#sInfo").textContent = "已内置 " + j.trackerCount + " 个 Tracker · " + engSt + " · 配置：" + j.dataDir;
   refreshAssoc();
+  refreshFirewall();
   openDlg("#mSet");
 };
 $("#sDirPick").onclick = async () => { const p = await pickDir(); if (p) $("#sDir").value = p; };

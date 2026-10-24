@@ -58,30 +58,54 @@ type btTask struct {
 	lastHint  time.Time
 }
 
-func pickBTListenPort() int {
-	// 与 aria2 一致：常见 BT 端口段，便于家宽路由器 UPnP / 手动映射。
+// btPortFree 探测端口的 TCP 与 UDP（DHT/uTP 同端口）是否都能绑定。
+func btPortFree(p int) bool {
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", p))
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	pc, err := net.ListenPacket("udp", fmt.Sprintf(":%d", p))
+	if err != nil {
+		return false
+	}
+	_ = pc.Close()
+	return true
+}
+
+// pickBTListenPort 优先沿用上次固定下来的端口（防火墙/端口映射规则保持有效），
+// 被占用时再从常见 BT 端口段 6881–6999 中选一个。
+func pickBTListenPort(preferred int) int {
+	if preferred > 0 && btPortFree(preferred) {
+		return preferred
+	}
 	for p := 6881; p <= 6999; p++ {
-		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", p))
-		if err != nil {
-			continue
-		}
-		_ = ln.Close()
-		// 再探一下 UDP（DHT/uTP 同端口）；失败也不致命，TCP 能绑就用。
-		pc, err := net.ListenPacket("udp", fmt.Sprintf(":%d", p))
-		if err == nil {
-			_ = pc.Close()
+		if btPortFree(p) {
 			return p
 		}
 	}
 	return 0 // 全占用时交给系统分配
 }
 
+// btLoopbackOnly is set only by tests (see testmain_test.go): bind the engine to
+// 127.0.0.1 with DHT, IPv6 and UPnP/NAT-PMP off, so `go test` never opens
+// wildcard listeners (which trigger Windows Firewall prompts). Production keeps
+// the default false and is unaffected.
+var btLoopbackOnly = false
+
 func StartBTEngine(appData string, cfgFn func() Config, trackers func() []string) (*BTEngine, error) {
 	dir := filepath.Join(appData, "bt")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	port := pickBTListenPort()
+	port := 0
+	if !btLoopbackOnly {
+		preferred := 0
+		if cfgFn != nil {
+			preferred = cfgFn().BTPort
+		}
+		port = pickBTListenPort(preferred)
+	}
 	cfg := torrent.NewDefaultClientConfig()
 	cfg.DataDir = dir
 	cfg.ListenPort = port
@@ -102,6 +126,13 @@ func StartBTEngine(appData string, cfgFn func() Config, trackers func() []string
 	cfg.HandshakesTimeout = 8 * time.Second
 	// IPv6 在双栈家宽有用；纯 IPv4 环境无害
 	cfg.DisableIPv6 = false
+	if btLoopbackOnly {
+		cfg.ListenHost = func(string) string { return "127.0.0.1" }
+		cfg.NoDHT = true
+		cfg.PeriodicallyAnnounceTorrentsToDht = false
+		cfg.NoDefaultPortForwarding = true
+		cfg.DisableIPv6 = true
+	}
 
 	cl, err := torrent.NewClient(cfg)
 	if err != nil {

@@ -4,8 +4,8 @@ import (
 	"encoding/base64"
 	"net"
 	"os"
-	"strconv"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -18,7 +18,16 @@ import (
 // 本地做种 → 本引擎下载合成多文件种子，验证有 peer 时能写出字节。
 func TestBTEngineLocalTransfer(t *testing.T) {
 	root := t.TempDir()
-	seedDir := filepath.Join(root, "seed")
+	// The seeder is a plain anacrolix client whose default mmap file IO keeps
+	// complete files mapped until the process exits (anacrolix v1.61:
+	// "the store never relinquishes its extra ref"). On Windows mapped files
+	// cannot be deleted, so seed data lives outside t.TempDir and is removed
+	// best-effort. The download side (our engine) must release its files; that
+	// is asserted below via dlDir.
+	seedDir, err := os.MkdirTemp("", "hdl-seed-*")
+	if err != nil {
+		t.Fatal(err)
+	}
 	dlDir := filepath.Join(root, "dl")
 	_ = os.MkdirAll(filepath.Join(seedDir, "pack"), 0755)
 	_ = os.MkdirAll(dlDir, 0755)
@@ -64,9 +73,19 @@ func TestBTEngineLocalTransfer(t *testing.T) {
 	scfg := torrent.NewDefaultClientConfig()
 	scfg.ListenPort = 0
 	scfg.NoDefaultPortForwarding = true
+	// Loopback only: no Windows Firewall prompt, no DHT/IPv6 wildcard sockets.
+	scfg.ListenHost = func(string) string { return "127.0.0.1" }
+	scfg.NoDHT = true
+	scfg.DisableIPv6 = true
 	scfg.Seed = true
 	scfg.DataDir = seedDir
-	scfg.DefaultStorage = storage.NewFile(seedDir)
+	// Map-based piece completion: the default bolt DB (.torrent.bolt.db) stays
+	// locked on Windows until the storage is closed, which breaks t.TempDir cleanup.
+	seedStore := storage.NewFileOpts(storage.NewFileClientOpts{
+		ClientBaseDir:   seedDir,
+		PieceCompletion: storage.NewMapPieceCompletion(),
+	})
+	scfg.DefaultStorage = seedStore
 	seedCl, err := torrent.NewClient(scfg)
 	if err != nil {
 		t.Fatal(err)
@@ -109,9 +128,28 @@ func TestBTEngineLocalTransfer(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		e.Close()
+		st.Drop()
 		seedCl.Close()
-		// Windows: anacrolix bolt DB may keep a short lock after Close
-		time.Sleep(400 * time.Millisecond)
+		<-seedCl.Closed()
+		// A caller-supplied DefaultStorage is not closed by Client.Close.
+		_ = seedStore.Close()
+		if err := os.RemoveAll(seedDir); err != nil {
+			t.Logf("seed dir not removed (test seeder's mmap, released at exit): %v", err)
+		}
+		// Downloaded files must not stay locked after the engine closes, otherwise
+		// users could not move/delete finished downloads on Windows. Allow a short
+		// grace period for in-flight piece I/O to finish.
+		start := time.Now()
+		var err error
+		for time.Since(start) < 3*time.Second {
+			if err = os.RemoveAll(dlDir); err == nil {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		if err != nil {
+			t.Errorf("downloaded files still locked %v after engine close: %v", time.Since(start), err)
+		}
 	})
 
 	gid, err := e.AddTorrentB64(base64.StdEncoding.EncodeToString(torBuf), "pack.torrent", dlDir, false)
@@ -148,7 +186,7 @@ func TestBTEngineLocalTransfer(t *testing.T) {
 	// 反向：做种端主动连下载端（家宽/容器里拨号方向常决定成败）
 	leecherPort := e.listen
 	st.AddPeers([]torrent.PeerInfo{{
-		Addr: &net.TCPAddr{IP: net.IP{127, 0, 0, 1}, Port: leecherPort},
+		Addr:   &net.TCPAddr{IP: net.IP{127, 0, 0, 1}, Port: leecherPort},
 		Source: torrent.PeerSourceDirect, Trusted: true,
 	}})
 	t.Logf("seeder=%s leecherPort=%d", seedAddr, leecherPort)
