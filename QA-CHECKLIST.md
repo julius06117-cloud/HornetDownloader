@@ -22,6 +22,7 @@ QA instance isolated from any real install: `--data-dir <qa>\data --port 16941 -
 | B10 | Regression | yt-dlp Wikimedia Commons 30.0 MB; `hdl list` exit 0 / 16 ms | PASS | |
 | B11 | UI | App-window screenshots: main list, 失败 tab with parked HTML tasks (重新开始 / 打开), 已完成 tab | PASS | screenshots v154-main/failed/done |
 | B12 | Build | `go vet` (windows + linux), `go test -count=3 ./...`, `node scripts/ui_ops_check.mjs`, `.\build.ps1` | PASS | |
+| B13 | Release | Anonymous `/releases/latest/download/` zip + SHA256SUMS.txt + release.json (v1.5.4) match; `install.ps1 -Json` from the live release: 1.5.3 → 1.5.4 `changed:true`, re-run `changed:false`; installed `hdl version` = 1.5.4 | PASS | zip SHA256 615030d205baad18002e0d412f1a2b770858e4b5209ae94ef35dac02723e31f6 |
 
 ## v1.5.3 results
 
