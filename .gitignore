@@ -4,3 +4,6 @@ screenshots/
 *.exe~
 *.log
 /hornetdl-linux
+*.test
+/hornetdl.exe
+/hornetdl

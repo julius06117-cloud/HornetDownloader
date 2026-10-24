@@ -11,14 +11,14 @@ import (
 )
 
 var (
-	user32Clip          = windows.NewLazySystemDLL("user32.dll")
-	procOpenClipboard   = user32Clip.NewProc("OpenClipboard")
-	procCloseClipboard  = user32Clip.NewProc("CloseClipboard")
-	procGetClipboardData = user32Clip.NewProc("GetClipboardData")
+	user32Clip                     = windows.NewLazySystemDLL("user32.dll")
+	procOpenClipboard              = user32Clip.NewProc("OpenClipboard")
+	procCloseClipboard             = user32Clip.NewProc("CloseClipboard")
+	procGetClipboardData           = user32Clip.NewProc("GetClipboardData")
 	procIsClipboardFormatAvailable = user32Clip.NewProc("IsClipboardFormatAvailable")
-	kernel32Clip        = windows.NewLazySystemDLL("kernel32.dll")
-	procGlobalLock      = kernel32Clip.NewProc("GlobalLock")
-	procGlobalUnlock    = kernel32Clip.NewProc("GlobalUnlock")
+	kernel32Clip                   = windows.NewLazySystemDLL("kernel32.dll")
+	procGlobalLock                 = kernel32Clip.NewProc("GlobalLock")
+	procGlobalUnlock               = kernel32Clip.NewProc("GlobalUnlock")
 )
 
 const cfUnicodeText = 13
@@ -42,7 +42,9 @@ func readClipboardText() (string, bool) {
 		return "", false
 	}
 	defer procGlobalUnlock.Call(h)
-	s := windows.UTF16PtrToString((*uint16)(unsafe.Pointer(p)))
+	// p is a uintptr from GlobalLock; reinterpret via its address so go vet's
+	// unsafeptr check is satisfied (the memory is locked until GlobalUnlock).
+	s := windows.UTF16PtrToString(*(**uint16)(unsafe.Pointer(&p)))
 	return s, true
 }
 
@@ -65,4 +67,3 @@ func (a *App) watchClipboard() {
 		}
 	}
 }
-

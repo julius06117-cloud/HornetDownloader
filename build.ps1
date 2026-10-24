@@ -28,7 +28,7 @@ if (-not $SkipTest) {
 New-Item -ItemType Directory -Force -Path build, dist | Out-Null
 $out = Join-Path $PSScriptRoot "build\HornetDownloader.exe"
 Write-Host "==> go build -> $out" -ForegroundColor Cyan
-go build -trimpath -ldflags "-s -w" -o $out .
+go build -trimpath -ldflags "-s -w -H windowsgui" -o $out .
 if ($LASTEXITCODE -ne 0) { throw "build failed" }
 
 $pkg = Join-Path $PSScriptRoot "build\pkg\HornetDownloader"
