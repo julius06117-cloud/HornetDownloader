@@ -297,3 +297,21 @@ func TestPeerUploadRateUsesByteDeltas(t *testing.T) {
 		t.Fatalf("after reset rate = %d, want 0", r)
 	}
 }
+
+func TestBTRecheckHintNotShownDuringNormalDownload(t *testing.T) {
+	if btLooksLikeRecheck(3, 50<<20) {
+		t.Fatal("a few freshly downloaded pieces queued for hashing must not show the recheck hint")
+	}
+	if btLooksLikeRecheck(800, 50<<20) {
+		t.Fatal("hash backlog during a fast download must not show the recheck hint")
+	}
+	if !btLooksLikeRecheck(5000, 0) {
+		t.Fatal("bulk re-hash after restart should show the hint")
+	}
+	if !btLooksLikeRecheck(5, 0) {
+		t.Fatal("hashing with no download traffic should show the hint")
+	}
+	if btLooksLikeRecheck(0, 0) {
+		t.Fatal("nothing pending: no hint")
+	}
+}

@@ -1172,7 +1172,7 @@ func (e *BTEngine) ticker() {
 			task.lastBytes, task.lastUp, task.lastRead, task.lastAt = done, up, rd, now
 			task.uploaded = up
 			if task.status == "active" || task.status == "waiting" {
-				task.checking = torrentChecking(task.t)
+				task.checking = btLooksLikeRecheck(torrentHashPending(task.t), task.speed)
 			} else {
 				task.checking = false
 			}
@@ -1401,14 +1401,22 @@ func (e *BTEngine) stopSeedingLocked(task *btTask) {
 	task.t.SetMaxEstablishedConns(0)
 }
 
-// torrentChecking：是否有分块正在/等待哈希校验。
-func torrentChecking(t *torrent.Torrent) bool {
+// torrentHashPending：正在/等待哈希校验的分块数。
+func torrentHashPending(t *torrent.Torrent) int {
+	n := 0
 	for _, r := range t.PieceStateRuns() {
 		if r.Hashing || r.QueuedForHash {
-			return true
+			n += r.Length
 		}
 	}
-	return false
+	return n
+}
+
+// btLooksLikeRecheck：是否在「校验已有数据」（重启后整批重新哈希）。
+// 正常下载时刚收完的分块也会排队哈希（50 MB/s 时积压可达数百块），不能因此显示「正在校验」；
+// 所以只在几乎没有网络下载流量时才算校验。
+func btLooksLikeRecheck(hashPending int, speed int64) bool {
+	return hashPending > 0 && speed < 128<<10
 }
 
 // finiteRate：anacrolix 的速率在没有数据时可能是 NaN/Inf，转成 int64 会变成
