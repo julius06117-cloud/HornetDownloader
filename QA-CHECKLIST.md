@@ -3,7 +3,7 @@
 Run on a real Windows 10/11 x64 machine before every release (`.\build.ps1`, then install and exercise the build).
 Test only with content you are allowed to download (Debian images are used below). Tests and QA never open ports beyond loopback except the BitTorrent listener.
 
-Last Windows run: **v1.5.4**, 2026-10-25 (Asia/Shanghai), Windows 11 x64, **Go 1.26.10** (`go.mod` toolchain). **v1.5.5 has not had a Windows QA pass** — the rows below are Linux `go test` / UI script only. Do not ship from that alone; run the v1.5.4 matrix again on Windows after `.\build.ps1`.
+Last Windows run: **v1.5.5**, 2026-10-28 (Asia/Shanghai), Windows 11 x64, **Go 1.26.10**. Targeted Windows Home pass of magnet piece-resume (C5) and the live-release install (C6) on the maintainer's machine. QA instance isolated from any real install: `--data-dir %TEMP%\hdl-qa-155\data --port 16891`. C1–C4 remain the earlier Linux `go test` / UI script results (Windows `.\build.ps1` was not re-run in this pass).
 
 ## v1.5.5 results
 
@@ -14,8 +14,8 @@ Last Windows run: **v1.5.4**, 2026-10-25 (Asia/Shanghai), Windows 11 x64, **Go 1
 | C3 | UI copy | Status 「校验续传」, tip says 断点续传 / 不是重新下载; progress keeps last known percent instead of a fresh 0% | PASS (Linux) | `TestResumeCheckSnapshotCopy`, `TestStatusTextShortAndTipPresent`, `node scripts/ui_ops_check.mjs`. Not opened in WebView2 |
 | C4 | Build | `go vet ./...`, `go test ./...` | PASS (Linux) | Windows `.\build.ps1` **not run** |
 | C4b | Build | Linux `bash ./build.sh` cross-compile (windows/amd64) | PASS | zip SHA256 `0280f87cdefec0ecae0076f8e8451c12321e6bb880ea7915d0dbfbb60e7ba297`. Not a Windows-built release and not published |
-| C5 | Manual | Magnet halfway → normal quit → reopen on Windows: progress continues, or the list says 校验续传 | NOT RUN | Needs a Windows machine and a legal torrent |
-| C6 | Release | GitHub Release zip / exe / hdl / install.ps1 / SHA256SUMS / release.json | NOT RUN | Not published from this environment |
+| C5 | Manual | Magnet halfway → normal quit → reopen on Windows: progress continues, or the list says 校验续传 | PASS | 2026-10-28, Windows 11 x64 Home, installed 1.5.5 (commit 8e98a83). Isolated `%TEMP%\hdl-qa-155\data`, port 16891. Sintel CC magnet `xt=urn:btih:08ada5a7a6183aae1e09d831df6748d566095a10` via `hdl add --engine bt`; quit at doneBytes≈27148288 (~21% of 129302391) via `POST /api/quit` (token from data-dir `api-token`). `bt/pieces/08ada5a7a6183aae1e09d831df6748d566095a10.json` saved. Reopen `--no-window`: `已恢复分块完成记录（322 块），跳过整盘校验`, then `下载完成` with doneBytes=totalBytes=129302391. No full rehash or zeroed progress. |
+| C6 | Release | GitHub Release zip / exe / hdl / install.ps1 / SHA256SUMS / release.json | PASS | Live at [v1.5.5](https://github.com/julius06117-cloud/HornetDownloader/releases/tag/v1.5.5). `install.ps1 -Version v1.5.5 -Mirror https://ghfast.top/ -Json` on Windows: ok=true, changed=true. Zip SHA256 `03987cfa6f3610c99ca2def5afb9aaa984f9349753635c97c986b7b1f21605d3` matches the release. Installed hdl/app 1.5.5, commit 8e98a83c2d35aa2930bbad3878be7eb1d20860cd, go1.26.10. |
 
 ## v1.5.4 results
 
