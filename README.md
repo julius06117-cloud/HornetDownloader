@@ -5,7 +5,7 @@
 
 **面向读者**：本文件优先给 coding agent / 维护者。代理协作约定见 [`AGENTS.md`](AGENTS.md)；自动化接口（CLI / API / 安装）见 [`docs/AGENT_API.md`](docs/AGENT_API.md)；终端用户说明见打包内的 `README.zh-CN.txt`；本机环境见 `DEV.md`。
 
-当前版本：**v1.5.4** · 模块名 `hornetdl` · Go **1.26.10+**（`go.mod` 的 `toolchain` 行；1.26.0/1.26.1 在 Windows 上有 UDP 栈损坏崩溃，见 AGENTS.md） · **`CGO_ENABLED=0`**（必须保持，便于单文件分发）。
+当前版本：**v1.5.5** · 模块名 `hornetdl` · Go **1.26.10+**（`go.mod` 的 `toolchain` 行；1.26.0/1.26.1 在 Windows 上有 UDP 栈损坏崩溃，见 AGENTS.md） · **`CGO_ENABLED=0`**（必须保持，便于单文件分发）。
 
 ---
 
@@ -64,7 +64,7 @@ go run .
 - **Windows 壳**：托盘 / 窗口 / 剪贴板 / 文件关联 → `*_windows.go`；非 Windows stub → `*_other.go`。
 - **内嵌二进制**：`embed/aria2c.exe`（`embed_windows.go` 首次释放到 `%APPDATA%\HornetDownloader\bin\`）。yt-dlp **不**内嵌，首次用时下载到同目录。
 
-运行时数据：`%APPDATA%\HornetDownloader\`（`config.json`、`aria2.session`、`bt-session.json`、`bin\`、`app.log`、`api-token`、`api-port`、`task-source.json`）。不要提交这些文件（仓库公开）。
+运行时数据：`%APPDATA%\HornetDownloader\`（`config.json`、`aria2.session`、`bt-session.json`、`bt\pieces\`、`bin\`、`app.log`、`api-token`、`api-port`、`task-source.json`）。不要提交这些文件（仓库公开）。
 
 ---
 

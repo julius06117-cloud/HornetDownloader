@@ -12,7 +12,7 @@ It started as a personal gift for the owner's wife, so polish and "it just works
 - Ships as **one portable `HornetDownloader.exe`** (windows/amd64, `CGO_ENABLED=0`) plus the console companion `hdl.exe`, zipped as `dist\HornetDownloader-win64.zip`. Install path: `%LOCALAPPDATA%\Programs\HornetDownloader`.
 - Three download engines: **aria2** (embedded `aria2c.exe` 1.37.0, JSON-RPC), **BitTorrent** (pure-Go `github.com/anacrolix/torrent`), **yt-dlp** (sidecar process, downloaded on first use).
 - UI: single-page `web/index.html` served on `http://127.0.0.1:16801`, shown in a WebView2 window (fallback: Edge app window via `--browser`).
-- Go module name: `hornetdl`; Go 1.26 (built with **go1.26.10** via the `toolchain` line in `go.mod`); current version v1.5.4.
+- Go module name: `hornetdl`; Go 1.26 (built with **go1.26.10** via the `toolchain` line in `go.mod`); current version v1.5.5.
 
 ## Repository map
 
@@ -29,7 +29,7 @@ It started as a personal gift for the owner's wife, so polish and "it just works
 | `recommend.go` | Engine IDs (`auto`/`aria2`/`bt`/`ytdlp`, plus `default`), `videoHosts`, `RecommendEngine`, `resolveEngine` |
 | `aria2.go` | aria2c process + JSON-RPC client: two pools — fast (6 conns, 8 s) and slow (2 conns, used for any timeout > 8 s, e.g. 45/90/120 s) — and health tracking |
 | `resilience.go` | "UI never waits on aria2": background task poller + cache (`/api/tasks`), single action queue (`/api/action`), paged file list (`/api/files`, 500/page), `/api/startbt`, UI log + heartbeat watchdog |
-| `bt_engine.go` | BitTorrent engine (anacrolix): listens 6881–6999, UPnP/NAT-PMP on, tracker re-announce, part files + map piece completion, `kickDownloadLocked`, reselect, session `bt-session.json` |
+| `bt_engine.go` | BitTorrent engine (anacrolix): listens 6881–6999, UPnP/NAT-PMP on, tracker re-announce, part files + durable piece completion in `bt/pieces/` (not a bolt DB in the download folder), `kickDownloadLocked`, reselect, session `bt-session.json` |
 | `ytdlp_engine.go` | yt-dlp sidecar: uses `bin\yt-dlp.exe`, then PATH, else downloads it (GitHub, then ghproxy mirror) |
 | `diag.go`, `diag_windows.go` | Diagnostics (v1.5.3): `crash-*.log` via `debug.SetCrashOutput`, `app.prev.log`, unclean-exit detection, memory heartbeat, opt-in loopback pprof + `/debug/mem`, bad-toolchain warning |
 | `taskmeta.go` | `task-meta.json`: created time, removed-task tombstones, app-detected errors (HTML guard), UA-retry aliases |
@@ -57,7 +57,7 @@ It started as a personal gift for the owner's wife, so polish and "it just works
 | `DEV.md` | Local Home dev environment and daily commands |
 | `README.zh-CN.txt` | End-user manual, shipped as `README.txt` in the zip |
 
-Runtime data: `%APPDATA%\HornetDownloader\` → `config.json`, `app.log`, `app.prev.log`, `crash-*.log`, `task-meta.json`, `bt\meta\`, `aria2.log`, `aria2.session`, `bt-session.json`, `api-token`, `api-port`, `task-source.json`, `bin\` (aria2c, yt-dlp). Never commit any of these.
+Runtime data: `%APPDATA%\HornetDownloader\` → `config.json`, `app.log`, `app.prev.log`, `crash-*.log`, `task-meta.json`, `bt\meta\`, `bt\pieces\` (BT piece-completion bitsets), `aria2.log`, `aria2.session`, `bt-session.json`, `api-token`, `api-port`, `task-source.json`, `bin\` (aria2c, yt-dlp). Never commit any of these.
 
 ## Engine routing (do not regress)
 
@@ -156,7 +156,7 @@ hdl version --json                                         # hdl + running app v
 - **Logging must never return errors to libraries.** The GUI-subsystem exe usually has no valid stderr; `multiWriter` (aria2.go) writes app.log and only best-effort stderr, and `btLogFilter.Handle` always returns nil, because anacrolix/log's `SlogHandlerAsHandler` panics on a handler error (v1.5.4 crash: a webtorrent tracker WARN killed the app). Don't reintroduce `io.MultiWriter(..., os.Stderr)`.
 - **Never block the UI on aria2.** aria2 is single-threaded and can stall (e.g. big torrents). Read from the poller cache, put mutations on the action queue, use the slow pool for long calls. Do not put synchronous RPC back on request paths.
 - **Windows file allocation:** `Config.effectiveFileAllocation()` maps `auto` → `prealloc` on Windows. `none`/`trunc` on NTFS causes zero-fill stalls that freeze aria2 RPC ("aria2 响应超时"). Read that comment before changing it.
-- **BitTorrent:** keep part files + `NewMapPieceCompletion` (bolt DB locks files on Windows); keep tracker re-adds and `kickDownloadLocked`; don't disable downloading from write-error handlers.
+- **BitTorrent:** keep part files. Piece completion is a JSON bitset in the data dir (`bt/pieces/<infohash>.json`), not `storage.NewMapPieceCompletion` and not a bolt DB in the download folder (that lock made Windows downloads stick at 0 B/s). A normal quit/reopen must reuse saved complete pieces. If a data file's size or mtime changed, those pieces are unknown again and get hashed. Keep tracker re-adds and `kickDownloadLocked`; don't disable downloading from write-error handlers. Don't let `setCompletionFromPartFiles` wipe saved bits for `.part` files.
 - **Firewall / listeners:** aria2 is HTTP/FTP-first: DHT/DHT6/LPD/PEX are off and RPC is loopback-only, so idle aria2 never listens on a public interface (it only opens `--listen-port` while an aria2 BT fallback task runs). The BT engine keeps a stable port (`Config.BTPort`, chosen once from 6881–6999). Tests must stay loopback-only: `testmain_test.go` sets `btLoopbackOnly` (127.0.0.1, no DHT/IPv6/UPnP); test servers use `127.0.0.1:0`. Never add a test that listens on `0.0.0.0`/`::` (Windows Firewall prompt).
 - **Embedded binaries:** `embed/aria2c.exe` must exist for Windows builds. yt-dlp is intentionally *not* embedded.
 - **UI language is Simplified Chinese.** All user-facing strings, notices and errors in Chinese; keep wording short. UI font is Noto Sans SC — never fall back to Song/宋体.

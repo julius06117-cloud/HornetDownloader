@@ -220,6 +220,15 @@ func (a *App) detailsOverview(gid, eng string) map[string]any {
 			ov["infoHash"] = t["infoHash"]
 			ov["errorMessage"] = t["errorMessage"]
 			ov["btListenPort"] = t["btListenPort"]
+			if t["btChecking"] != nil {
+				ov["btChecking"] = t["btChecking"]
+			}
+			if t["btResumeBytes"] != nil {
+				ov["btResumeBytes"] = t["btResumeBytes"]
+			}
+			if t["btCheckPercent"] != nil {
+				ov["btCheckPercent"] = t["btCheckPercent"]
+			}
 			ov["link"] = a.bt.URIOf(gid)
 			if at := a.bt.AddedAt(gid); !at.IsZero() {
 				ov["createdAt"] = at.UnixMilli()

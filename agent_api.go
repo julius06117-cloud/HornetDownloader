@@ -74,9 +74,13 @@ type agentTask struct {
 	Peers      int64    `json:"peers"`   // 连接数（BT 为对等节点数）
 	Seeders    int64    `json:"seeders"` // BT 做种者
 	Error      string   `json:"error,omitempty"`
-	FollowedBy string   `json:"followedBy,omitempty"` // aria2 磁力：元数据任务完成后真正的下载任务 ID
-	Source     string   `json:"source,omitempty"`
-	AddedBy    string   `json:"addedBy,omitempty"` // agent | user
+	// v1.5.5：BitTorrent 正在校验已下载数据（断点续传）。status 仍是 active；error 只是说明，不是失败。
+	Checking bool `json:"checking,omitempty"`
+	// v1.5.5：校验期间上次已知的已完成字节。doneBytes 是已经确认的字节，可能暂时更小。
+	ResumeBytes int64  `json:"resumeBytes,omitempty"`
+	FollowedBy  string `json:"followedBy,omitempty"` // aria2 磁力：元数据任务完成后真正的下载任务 ID
+	Source      string `json:"source,omitempty"`
+	AddedBy     string `json:"addedBy,omitempty"` // agent | user
 }
 
 func toAgentTask(t map[string]any) agentTask {
@@ -91,6 +95,7 @@ func toAgentTask(t map[string]any) agentTask {
 		TotalBytes: parseInt64(t["totalLength"]), DoneBytes: parseInt64(t["completedLength"]),
 		SpeedBps: parseInt64(t["downloadSpeed"]), Error: s("errorMessage"), Files: []string{},
 		AddedBy: s("addedBy"), Peers: parseInt64(t["connections"]), Seeders: parseInt64(t["numSeeders"]),
+		Checking: s("btChecking") == "true", ResumeBytes: parseInt64(t["btResumeBytes"]),
 	}
 	if at.Status != "active" {
 		at.SpeedBps = 0 // aria2 暂停后的一两秒里仍报告上次的速度

@@ -11,7 +11,7 @@ import (
 )
 
 // Version 是发布版本号（HornetDownloader.exe 与 hdl.exe 共用；与 README / 发布 zip 一致）。
-const Version = "1.5.4"
+const Version = "1.5.5"
 
 // Build 描述当前可执行文件的构建信息（来自 Go 嵌入的构建信息）。
 type Build struct {

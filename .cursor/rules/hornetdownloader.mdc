@@ -9,7 +9,7 @@ Key rules:
 - Go, `CGO_ENABLED=0`, windows/amd64, single portable exe. No cgo / DLL dependencies.
 - Every task add goes through `routeAdd` (engines.go). Explicit engine failure = error, never silent aria2 fallback; duplicate magnet returns the existing task.
 - UI must never wait on aria2: use the poller cache and action queue in `resilience.go`; long RPCs use the slow pool.
-- Keep `fileAllocation` auto → prealloc on Windows; keep BT map piece completion + part files.
+- Keep `fileAllocation` auto → prealloc on Windows; keep BT part files and the data-dir piece-completion bitset (not a bolt DB in the download folder).
 - User-facing text is Simplified Chinese; UI font Noto Sans SC (never 宋体).
 - Done = `go vet ./...` + `go test ./...` pass on Windows, `.\build.ps1` succeeds, and you self-QA the exe before handing over.
 - On Windows agent shells, run PowerShell via a `.ps1` file with `-File` (inline `-Command` strips `$vars`).
