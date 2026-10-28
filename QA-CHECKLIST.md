@@ -3,8 +3,19 @@
 Run on a real Windows 10/11 x64 machine before every release (`.\build.ps1`, then install and exercise the build).
 Test only with content you are allowed to download (Debian images are used below). Tests and QA never open ports beyond loopback except the BitTorrent listener.
 
-Last run: **v1.5.4**, 2026-10-25 (Asia/Shanghai), Windows 11 x64, **Go 1.26.10** (`go.mod` toolchain), build `HornetDownloader-win64.zip` (see SHA256SUMS.txt of the release). Targeted QA of the v1.5.4 fixes plus a short regression pass (no soak).
-QA instance isolated from any real install: `--data-dir <qa>\data --port 16941 --pprof 127.0.0.1:6081`, downloads only into `<qa>\dl`.
+Last Windows run: **v1.5.4**, 2026-10-25 (Asia/Shanghai), Windows 11 x64, **Go 1.26.10** (`go.mod` toolchain). **v1.5.5 has not had a Windows QA pass** — the rows below are Linux `go test` / UI script only. Do not ship from that alone; run the v1.5.4 matrix again on Windows after `.\build.ps1`.
+
+## v1.5.5 results
+
+| # | Area | Check | Result | Notes |
+|---|------|-------|--------|-------|
+| C1 | BT resume | Saved piece completion: quit and reopen keeps completed bytes and does not queue a full rehash | PASS (Linux) | `TestBTRestartKeepsSavedPieces` |
+| C2 | BT corrupt | File whose recorded mtime does not match is rehashed; the damaged piece is not left complete | PASS (Linux) | `TestBTChangedFileIsRechecked`; part-file open does not clear saved bits (`TestPartFileOpenDoesNotClearCompleteBits`) |
+| C3 | UI copy | Status 「校验续传」, tip says 断点续传 / 不是重新下载; progress keeps last known percent instead of a fresh 0% | PASS (Linux) | `TestResumeCheckSnapshotCopy`, `TestStatusTextShortAndTipPresent`, `node scripts/ui_ops_check.mjs`. Not opened in WebView2 |
+| C4 | Build | `go vet ./...`, `go test ./...` | PASS (Linux) | Windows `.\build.ps1` **not run** |
+| C4b | Build | Linux `bash ./build.sh` cross-compile (windows/amd64) | PASS | zip SHA256 `0280f87cdefec0ecae0076f8e8451c12321e6bb880ea7915d0dbfbb60e7ba297`. Not a Windows-built release and not published |
+| C5 | Manual | Magnet halfway → normal quit → reopen on Windows: progress continues, or the list says 校验续传 | NOT RUN | Needs a Windows machine and a legal torrent |
+| C6 | Release | GitHub Release zip / exe / hdl / install.ps1 / SHA256SUMS / release.json | NOT RUN | Not published from this environment |
 
 ## v1.5.4 results
 

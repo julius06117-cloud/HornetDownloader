@@ -582,7 +582,11 @@ func helpJSON() map[string]any {
 			{"name": "resume", "args": "<id>", "flags": []string{"--json"}, "desc": "resume a task"},
 			{"name": "version", "args": "", "flags": []string{"--json"}, "desc": "hdl version, running app version (never starts the app), Go toolchain, git commit; always exits 0"},
 		},
-		"version":     Version,
+		"version": Version,
+		"taskFields": map[string]string{
+			"checking":    "since 1.5.5: true while BitTorrent is hashing data already on disk (resume after restart, not a new download). status stays active; error is a note, not a failure",
+			"resumeBytes": "since 1.5.5: last known completed bytes while checking; doneBytes is bytes confirmed so far and may be lower until the check finishes",
+		},
 		"commonFlags": []string{"--data-dir", "--port", "--no-start"},
 		"engines":     []string{"auto", "aria2", "bt", "ytdlp"},
 		"exitCodes": map[string]string{

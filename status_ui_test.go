@@ -26,6 +26,16 @@ func TestStatusTextShortAndTipPresent(t *testing.T) {
 	if !strings.Contains(st, "下载中 · 连接 ") {
 		t.Fatal("full tip for BT peers missing")
 	}
+	if !strings.Contains(html, "function isResumeCheck") || !strings.Contains(html, "function progressView") {
+		t.Fatal("resume-check helpers missing")
+	}
+	if !strings.Contains(st, "校验续传") || !strings.Contains(st, "不是重新下载") {
+		t.Fatal("statusText must say resume check, not a fresh download")
+	}
+	pv := extractFn(html, "progressView")
+	if !strings.Contains(pv, "上次") || !strings.Contains(pv, "续传校验") {
+		t.Fatal("progressView must keep last progress during resume check")
+	}
 	ops := extractFn(html, "buildOps")
 	if strings.Count(ops, `btn("pause"`) != 1 {
 		t.Fatal("pause must appear once in buildOps")
